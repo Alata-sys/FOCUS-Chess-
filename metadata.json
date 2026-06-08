@@ -1,0 +1,6 @@
+{
+  "name": "FOCUS+",
+  "description": "Application de coaching IA aux échecs connectée à Lichess et analysée par Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
