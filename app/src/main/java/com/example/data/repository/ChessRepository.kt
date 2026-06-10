@@ -17,6 +17,8 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import okhttp3.ResponseBody
@@ -81,6 +83,7 @@ class ChessRepository(
                 bulletElo = response.perfs?.bullet?.rating ?: 1500,
                 rapidElo = response.perfs?.rapid?.rating ?: 1500,
                 classicalElo = response.perfs?.classical?.rating ?: 1500,
+                puzzleElo = response.perfs?.puzzle?.rating ?: 1500,
                 winCount = response.count?.win ?: 0,
                 lossCount = response.count?.loss ?: 0,
                 drawCount = response.count?.draw ?: 0
@@ -120,6 +123,7 @@ class ChessRepository(
                 bulletElo = response.perfs?.bullet?.rating ?: 1500,
                 rapidElo = response.perfs?.rapid?.rating ?: 1500,
                 classicalElo = response.perfs?.classical?.rating ?: 1500,
+                puzzleElo = response.perfs?.puzzle?.rating ?: 1500,
                 winCount = response.count?.win ?: 0,
                 lossCount = response.count?.loss ?: 0,
                 drawCount = response.count?.draw ?: 0,
@@ -499,6 +503,7 @@ class ChessRepository(
     /**
      * Anticipated Analysis System (Anti-Lag Bullet): Takes all moves of the game,
      * queries Gemini once in background, receives JSON structure mapping each move to an explanation and evaluation.
+     * Supports games with up to 300+ moves by chunking them into smaller concurrent requests.
      */
     suspend fun getAnticipatedMoveAnalyses(
         moves: List<String>,
@@ -508,21 +513,61 @@ class ChessRepository(
             return@withContext Result.failure(Exception("Clé API Gemini absente ou non configurée."))
         }
 
-        val movesJoin = moves.mapIndexed { idx, m -> "Coup demi-coup (ply index) $idx : $m" }.joinToString("\n")
-        val prompt = "Voici l'historique complet des demi-coups (ply list) de la partie d'échecs :\n" +
+        val chunkSize = 40
+        val mergedMap = mutableMapOf<Int, com.example.data.model.MoveAnalysis>()
+
+        // Split all moves into chunks of 40
+        val chunks = moves.chunked(chunkSize)
+        
+        coroutineScope {
+            val deferreds = chunks.mapIndexed { chunkIdx, chunkMoves ->
+                val startOffset = chunkIdx * chunkSize
+                async {
+                    getAnticipatedMoveAnalysesForChunk(chunkMoves, startOffset, apiKey)
+                }
+            }
+
+            var anySuccess = false
+            var lastError: Exception? = null
+
+            for (deferred in deferreds) {
+                val res = deferred.await()
+                if (res.isSuccess) {
+                    anySuccess = true
+                    val map = res.getOrNull() ?: emptyMap()
+                    mergedMap.putAll(map)
+                } else {
+                    lastError = res.exceptionOrNull() as? Exception ?: Exception("Analyse de tronçon échouée.")
+                }
+            }
+
+            if (anySuccess) {
+                Result.success(mergedMap)
+            } else {
+                Result.failure(lastError ?: Exception("Tous les tronçons d'analyse ont échoué."))
+            }
+        }
+    }
+
+    private suspend fun getAnticipatedMoveAnalysesForChunk(
+        chunkMoves: List<String>,
+        startOffset: Int,
+        apiKey: String
+    ): Result<Map<Int, com.example.data.model.MoveAnalysis>> = withContext(Dispatchers.IO) {
+        val totalCount = chunkMoves.size
+        val endOffset = startOffset + totalCount - 1
+        
+        val movesJoin = chunkMoves.mapIndexed { idx, m -> "Coup demi-coup (ply index) ${startOffset + idx} : $m" }.joinToString("\n")
+        val prompt = "Voici un extrait des coups (demi-coups/plies) de la partie d'échecs (du coup index ${startOffset} au coup ${endOffset}) :\n" +
                 "$movesJoin\n\n" +
                 "Tu es un grand maître d'échecs et coach d'élite. Tu dois analyser chacun des coups de cette liste en une seule fois.\n" +
-                "Génère une réponse sous forme d'un UNIQUE objet JSON plat contenant obligatoirement pour chaque index de demi-coup (depuis '0' jusqu'à '${moves.size - 1}') un commentaire pédagogique court (2 phases maximum, chaleureux) et la valeur de l'évaluation numérique absolue du point de vue des Blancs (en nombre de pions équivalent : valeurs positives si les Blancs ont l'avantage, ex: +0.7 ou 1.2 ; valeurs négatives si les Noirs ont l'avantage, ex: -1.5 ; 0.0 pour l'égalité). Si c'est un mat forcé pour les blancs, mets +99.0, et pour les noirs -99.0.\n" +
+                "En te basant sur le contexte global, génère une réponse sous forme d'un UNIQUE objet JSON plat contenant obligatoirement pour chaque index de demi-coup (depuis '${startOffset}' jusqu'à '${endOffset}') un commentaire pédagogique court (2 phrases maximum, chaleureux) et la valeur de l'évaluation numérique absolue du point de vue des Blancs (en nombre de pions : par exemple +0.8 ou 1.2 ; valeurs négatives si l'avantage est noir, ex: -1.5 ; 0.0 pour l'égalité). Si c'est un mat forcé pour les blancs, mets +99.0, et pour les noirs -99.0.\n" +
                 "Renvoie DIRECTEMENT le JSON sans bloc markdown (pas de ```json), sans introduction, sans conclusion.\n" +
                 "Structure JSON attendue :\n" +
                 "{\n" +
-                "  \"0\": {\n" +
+                "  \"$startOffset\": {\n" +
                 "    \"comment\": \"Excellent coup de développement qui prend le contrôle du centre.\",\n" +
                 "    \"evaluation\": 0.35\n" +
-                "  },\n" +
-                "  \"1\": {\n" +
-                "    \"comment\": \"Les Noirs luttent immédiatement pour le centre de l'échiquier.\",\n" +
-                "    \"evaluation\": 0.15\n" +
                 "  }\n" +
                 "}"
 
@@ -535,7 +580,7 @@ class ChessRepository(
         try {
             val response = GeminiClient.service.generateContent(apiKey, request)
             var text = response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                ?: return@withContext Result.failure(Exception("Réponse vide de Gemini"))
+                ?: return@withContext Result.failure(Exception("Réponse vide de Gemini pour le tronçon $startOffset"))
             
             // Clean up codeblock if present
             if (text.contains("```json")) {
@@ -566,7 +611,7 @@ class ChessRepository(
             }
             Result.success(resultMap)
         } catch (e: Exception) {
-            Log.e("ChessRepository", "getAnticipatedMoveAnalyses error", e)
+            Log.e("ChessRepository", "getAnticipatedMoveAnalysesForChunk error at chunk $startOffset", e)
             Result.failure(e)
         }
     }

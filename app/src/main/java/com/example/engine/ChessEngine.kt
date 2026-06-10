@@ -347,6 +347,21 @@ object ChessEngine {
             }
         }
 
+        // 3b. Check Coordinate Moves with promotion (e.g. "e7e8q", "e7e8Q")
+        if (clean.length == 5 && 
+            clean[0] in 'a'..'h' && clean[1] in '1'..'8' && 
+            clean[2] in 'a'..'h' && clean[3] in '1'..'8') {
+            val fromSq = algebraicToSquare(clean.substring(0, 2))
+            val toSq = algebraicToSquare(clean.substring(2, 4))
+            val promo = clean[4]
+            if (fromSq != -1 && toSq != -1) {
+                val piece = nextBoard[fromSq]
+                nextBoard[toSq] = if (isWhite) promo.uppercaseChar() else promo.lowercaseChar()
+                nextBoard[fromSq] = '.'
+                return nextBoard to moveStr
+            }
+        }
+
         // 4. Check Standard Algebraic Notation (SAN)
         var sanClean = clean.replace("x", "") // remove capture tag
         

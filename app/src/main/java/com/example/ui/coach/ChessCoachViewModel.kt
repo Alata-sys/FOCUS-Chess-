@@ -26,6 +26,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class ChessCoachViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -108,6 +112,10 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     var cachedAnalyses by mutableStateOf<Map<Int, com.example.data.model.MoveAnalysis>>(emptyMap())
 
     // Accessibility & Modern Lichess Toggles
+    var isBoardFlipped by mutableStateOf(false)
+    fun toggleBoardFlip() {
+        isBoardFlipped = !isBoardFlipped
+    }
     var isBlindAccessibilityMode by mutableStateOf(false)
     var isComputerAnalysisEnabled by mutableStateOf(true)
     var showTimePerMove by mutableStateOf(false)
@@ -145,6 +153,7 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     init {
+        ChessSoundManager.initialize(application)
         ttsManager = ChessTtsManager(application)
         
         // Feed offline default puzzles into database if base is empty
@@ -362,6 +371,11 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         // BACKROUND ANTICIPATORY ANALYSIS CALL!
         val apiKey = com.example.BuildConfig.GEMINI_API_KEY ?: "MY_GEMINI_API_KEY"
         triggerAnticipatoryAnalysis(movesList, apiKey)
+
+        // Immediately jump to the end of the game
+        if (movesList.isNotEmpty()) {
+            selectHistoryMove(movesList.size - 1, apiKey)
+        }
     }
 
     fun triggerAnticipatoryAnalysis(moves: List<String>, apiKey: String) {
@@ -369,11 +383,61 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         isAnalyzing = true
         viewModelScope.launch {
             try {
+                // Compute all FENs for the game's moves sequentially
+                val fens = mutableListOf<String>()
+                var board = originalBoardState.copyOf()
+                var whiteTurn = true
+                for (moveStr in moves) {
+                    val result = ChessEngine.parseAndExecuteAnyMove(board, moveStr, whiteTurn)
+                    if (result != null) {
+                        board = result.first
+                    }
+                    whiteTurn = !whiteTurn
+                    fens.add(ChessEngine.toFen(board, whiteTurn))
+                }
+
+                // Parallel query Lichess Stockfish engine evaluations for each position
+                val realStockfishEvals = mutableMapOf<Int, String>()
+                coroutineScope {
+                    val deferredEvals = fens.mapIndexed { index, fen ->
+                        async(Dispatchers.IO) {
+                            try {
+                                val evalData = repository.fetchLichessCloudEval(fen)
+                                index to (evalData?.score ?: "0.0")
+                            } catch (e: Exception) {
+                                index to "0.0"
+                            }
+                        }
+                    }
+                    deferredEvals.forEach { deferred ->
+                        val (idx, evalStr) = deferred.await()
+                        realStockfishEvals[idx] = evalStr
+                    }
+                }
+
                 val result = repository.getAnticipatedMoveAnalyses(moves, apiKey)
                 if (result.isSuccess) {
                     val rawMap = result.getOrNull() ?: emptyMap()
-                    cachedAnalyses = rawMap
-                    coachAdvice = "Analyse anticipée terminée avec succès ! La navigation est maintenant instantanée sans latence."
+                    
+                    val merged = rawMap.mapValues { (index, analysis) ->
+                        val trueEval = realStockfishEvals[index] ?: "0.0"
+                        var scoreVal = 0.0
+                        try {
+                            if (trueEval.contains("Mat") || trueEval.contains("Mate")) {
+                                scoreVal = if (trueEval.contains("-")) -9.9 else 9.9
+                            } else {
+                                scoreVal = trueEval.replace("+", "").replace(" ", "").toDoubleOrNull() ?: 0.0
+                            }
+                        } catch (e: Exception) {}
+                        
+                        com.example.data.model.MoveAnalysis(
+                            comment = analysis.comment,
+                            evaluation = scoreVal
+                        )
+                    }
+                    
+                    cachedAnalyses = merged
+                    coachAdvice = "Analyse anticipée Stockfish & IA terminée avec succès ! La navigation est 100% fluide."
                 } else {
                     Log.e("ChessCoachViewModel", "Anticipatory pre-analysis failed: ${result.exceptionOrNull()?.message}")
                     coachAdvice = "Analyse anticipée indisponible. L'analyse en direct est activée pour votre navigation."
@@ -382,6 +446,10 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
                 Log.e("ChessCoachViewModel", "Failed to run background pre-analysis", e)
             } finally {
                 isAnalyzing = false
+                val currIdx = activeMoveIndex
+                if (currIdx in 0 until moveHistoryList.size) {
+                    selectHistoryMove(currIdx, apiKey)
+                }
             }
         }
     }
@@ -415,7 +483,17 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         displayedFen = ChessEngine.toFen(board, whiteTurn)
         
         if (indexBefore != index) {
-            playMoveSound(boardBefore, currentBoardState, whiteTurn)
+            if (index >= 0) {
+                val moveStr = moveHistoryList.getOrNull(index) ?: ""
+                when {
+                    moveStr.endsWith("#") -> ChessSoundManager.playGameEnd()
+                    moveStr.endsWith("+") -> ChessSoundManager.playCheck()
+                    moveStr.contains("x") -> ChessSoundManager.playCapture()
+                    else -> ChessSoundManager.playMove()
+                }
+            } else {
+                ChessSoundManager.playMove()
+            }
         }
         
         if (index == -1) {
@@ -544,6 +622,24 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private suspend fun getEvaluationForFen(fen: String, useLocalFallback: Boolean = true): com.example.data.repository.CloudEvalData {
+        if (isLocalEngineMode) {
+            stockfishJsEngine.evaluate(fen)
+            kotlinx.coroutines.delay(1200)
+            val evalStr = stockfishJsEngine.evaluation.value
+            val bestMove = stockfishJsEngine.bestMove.value.ifEmpty { null }
+            
+            var scoreVal = 0.0
+            try {
+                if (evalStr.contains("Mat") || evalStr.contains("Mate")) {
+                    scoreVal = if (evalStr.contains("-")) -100.0 else 100.0
+                } else {
+                    scoreVal = evalStr.replace("+", "").replace(" ", "").toDoubleOrNull() ?: 0.0
+                }
+            } catch (e: Exception) {}
+            
+            return com.example.data.repository.CloudEvalData(score = evalStr, scoreVal = scoreVal, bestMove = bestMove)
+        }
+
         val cloudData = try {
             repository.fetchLichessCloudEval(fen)
         } catch (e: Exception) {
@@ -590,15 +686,11 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
                 var whiteBefore = true
                 for (i in 0 until currentIndex) {
                     val moveStr = history.getOrNull(i) ?: break
-                    if (moveStr.length >= 4) {
-                        val fromSq = ChessEngine.algebraicToSquare(moveStr.substring(0, 2))
-                        val toSq = ChessEngine.algebraicToSquare(moveStr.substring(2, 4))
-                        if (fromSq != -1 && toSq != -1) {
-                            val result = ChessEngine.executeMove(boardBefore, fromSq, toSq)
-                            boardBefore = result.first
-                            whiteBefore = !whiteBefore
-                        }
+                    val parseRes = ChessEngine.parseAndExecuteAnyMove(boardBefore, moveStr, whiteBefore)
+                    if (parseRes != null) {
+                        boardBefore = parseRes.first
                     }
+                    whiteBefore = !whiteBefore
                 }
                 val fenBefore = ChessEngine.toFen(boardBefore, whiteBefore)
                 
@@ -608,13 +700,15 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
                 val latestMoveStr = history.getOrNull(currentIndex)
                 var lastFrom = -1
                 var lastTo = -1
-                if (latestMoveStr != null && latestMoveStr.length >= 4) {
-                    lastFrom = ChessEngine.algebraicToSquare(latestMoveStr.substring(0, 2))
-                    lastTo = ChessEngine.algebraicToSquare(latestMoveStr.substring(2, 4))
-                    if (lastFrom != -1 && lastTo != -1) {
-                        val result = ChessEngine.executeMove(boardAfter, lastFrom, lastTo)
-                        boardAfter = result.first
-                        whiteAfter = !whiteAfter
+                if (latestMoveStr != null) {
+                    val parseRes = ChessEngine.parseAndExecuteAnyMove(boardAfter, latestMoveStr, whiteAfter)
+                    if (parseRes != null) {
+                        boardAfter = parseRes.first
+                    }
+                    whiteAfter = !whiteAfter
+                    if (latestMoveStr.length >= 4 && latestMoveStr[0] in 'a'..'h') {
+                        lastFrom = ChessEngine.algebraicToSquare(latestMoveStr.substring(0, 2))
+                        lastTo = ChessEngine.algebraicToSquare(latestMoveStr.substring(2, 4))
                     }
                 }
                 val fenAfter = ChessEngine.toFen(boardAfter, whiteAfter)
@@ -627,7 +721,7 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
                 val playedFrench = if (lastFrom != -1 && lastTo != -1) {
                     getFrenchMoveNotation(boardBefore, lastFrom, lastTo)
                 } else {
-                    lastMove
+                    latestMoveStr ?: lastMove
                 }
                 
                 val bestMoveUci = scoreBefore.bestMove

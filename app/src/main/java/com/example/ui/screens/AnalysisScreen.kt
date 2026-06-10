@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,12 +24,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
 import com.example.BuildConfig
 import com.example.ui.coach.ChessCoachViewModel
 import com.example.ui.components.ChessBoardUi
@@ -63,10 +70,11 @@ fun AnalysisScreen(
     val evalScoreStr = stockfishEval
     val evalDouble = remember(evalScoreStr) {
         try {
-            if (evalScoreStr.contains("Mat") || evalScoreStr.contains("Mate")) {
-                if (evalScoreStr.contains("-")) -9.9 else 9.9
+            val clean = evalScoreStr.trim()
+            if (clean.contains("Mat") || clean.contains("Mate") || clean.contains("#")) {
+                if (clean.contains("-")) -9.9 else 9.9
             } else {
-                evalScoreStr.replace("+", "").replace(" ", "").toDoubleOrNull() ?: 0.0
+                clean.replace("+", "").replace(" ", "").toDoubleOrNull() ?: 0.0
             }
         } catch (e: Exception) {
             0.0
@@ -137,11 +145,11 @@ fun AnalysisScreen(
                     )
                 }
 
-                // Format values for display: Top is White (evalDouble), Bottom is Black (-evalDouble)
-                val topLabel = if (evalDouble >= 0) "+${String.format(java.util.Locale.US, "%.1f", evalDouble)}" else String.format(java.util.Locale.US, "%.1f", evalDouble)
-                val bottomLabel = if (-evalDouble >= 0) "+${String.format(java.util.Locale.US, "%.1f", -evalDouble)}" else String.format(java.util.Locale.US, "%.1f", -evalDouble)
+                // Format values for display: Top is Black (-evalDouble), Bottom is White (evalDouble)
+                val topLabel = if (-evalDouble == 9.9) "M" else if (-evalDouble == -9.9) "-M" else if (-evalDouble >= 0) "+${String.format(java.util.Locale.US, "%.1f", -evalDouble)}" else String.format(java.util.Locale.US, "%.1f", -evalDouble)
+                val bottomLabel = if (evalDouble == 9.9) "M" else if (evalDouble == -9.9) "-M" else if (evalDouble >= 0) "+${String.format(java.util.Locale.US, "%.1f", evalDouble)}" else String.format(java.util.Locale.US, "%.1f", evalDouble)
 
-                // Top Label (Côté Blancs - Valeur brute)
+                // Top Label (Côté Noirs - Opposé mathématique)
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
@@ -154,12 +162,12 @@ fun AnalysisScreen(
                         text = topLabel,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = Color.LightGray,
                         maxLines = 1
                     )
                 }
 
-                // Bottom Label (Côté Noirs - Opposé mathématique)
+                // Bottom Label (Côté Blancs - Valeur brute)
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -172,7 +180,7 @@ fun AnalysisScreen(
                         text = bottomLabel,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.LightGray,
+                        color = Color.White,
                         maxLines = 1
                     )
                 }
@@ -194,7 +202,8 @@ fun AnalysisScreen(
                     onSquareClick = { idx ->
                         viewModel.handleSquareClick(idx, geminiApiKey)
                     },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    isFlipped = viewModel.isBoardFlipped
                 )
             }
         }
@@ -260,183 +269,119 @@ fun AnalysisScreen(
                 }
             }
 
-            // --- NAVIGATION CONTROLS ---
+            // --- NAVIGATION CONTROLS WITH LONG-PRESS AUTO-REPEAT ---
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(
-                    onClick = {
-                        if (currentIndex >= 0) {
-                            viewModel.selectHistoryMove(currentIndex - 1, geminiApiKey)
-                        }
-                    },
-                    enabled = currentIndex >= 0,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1E2124),
-                        disabledContainerColor = Color(0xFF121415)
-                    ),
-                    modifier = Modifier.weight(1f)
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.ChevronLeft, contentDescription = "Précédent", tint = Color.White)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Precedent", fontSize = 12.sp, color = Color.White)
+                    AutoRepeatButton(
+                        enabled = currentIndex >= 0,
+                        onClick = {
+                            if (currentIndex >= 0) {
+                                viewModel.selectHistoryMove(currentIndex - 1, geminiApiKey)
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(imageVector = Icons.Default.ChevronLeft, contentDescription = "Précédent", tint = Color.White)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Précédent", fontSize = 12.sp, color = Color.White)
+                    }
+
+                    AutoRepeatButton(
+                        enabled = currentIndex < movesList.size - 1,
+                        onClick = {
+                            if (currentIndex < movesList.size - 1) {
+                                viewModel.selectHistoryMove(currentIndex + 1, geminiApiKey)
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Suivant", fontSize = 12.sp, color = Color.White)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "Suivant", tint = Color.White)
+                    }
                 }
 
-                Button(
-                    onClick = {
-                        if (currentIndex < movesList.size - 1) {
-                            viewModel.selectHistoryMove(currentIndex + 1, geminiApiKey)
-                        }
-                    },
-                    enabled = currentIndex < movesList.size - 1,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
+                IconButton(
+                    onClick = { viewModel.toggleBoardFlip() },
+                    colors = IconButtonDefaults.iconButtonColors(
                         containerColor = Color(0xFF1E2124),
-                        disabledContainerColor = Color(0xFF121415)
+                        contentColor = Color.LightGray
                     ),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .testTag("lichess_board_flip_button")
                 ) {
-                    Text("Suivant", fontSize = 12.sp, color = Color.White)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "Suivant", tint = Color.White)
+                    Icon(
+                        imageVector = Icons.Default.Loop,
+                        contentDescription = "Inverser la perspective de l'échiquier",
+                        tint = Color.LightGray,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
 
-            // --- COACH ADVICE CARD ---
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1C1E)),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            // --- DEEP DISCREET VOICE COACH MODE (NO HOGGING CARDS) ---
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("coach_advice_card")
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF141618))
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .testTag("voice_coach_indicator"),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    // Coach Label and Controls
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0x224B7399)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("🧙‍♂️", fontSize = 20.sp)
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "Coach Assistant FOCUS+",
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White,
-                                    fontSize = 15.sp
-                                )
-                                Text(
-                                    text = "Données Cloud Lichess + Gemini",
-                                    color = Color(0xFF4CA288),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
+                val infiniteTransition = rememberInfiniteTransition()
+                val scale by infiniteTransition.animateFloat(
+                    initialValue = 0.9f,
+                    targetValue = 1.25f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(650, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                    )
+                )
 
-                        // Action Panel (TTS Speak, Re-evaluate)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledIconButton(
-                                onClick = { viewModel.speakAdvice(coachAdvice) },
-                                shape = CircleShape,
-                                colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0x1BFFFFFF)),
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Hearing,
-                                    contentDescription = "Écouter l'analyse",
-                                    tint = Color.LightGray,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x154CA288))
+                        .clickable { viewModel.speakAdvice(coachAdvice) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Hearing,
+                        contentDescription = "Répéter l'analyse vocale",
+                        tint = Color(0xFF4CA288),
+                        modifier = Modifier
+                            .graphicsLayer(scaleX = scale, scaleY = scale)
+                            .size(20.dp)
+                    )
+                }
 
-                            FilledIconButton(
-                                onClick = {
-                                    val activeMoveCode = movesList.getOrNull(currentIndex) ?: "début"
-                                    viewModel.selectHistoryMove(currentIndex, geminiApiKey)
-                                },
-                                shape = CircleShape,
-                                colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0x154B7399)),
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Loop,
-                                    contentDescription = "Réévaluer",
-                                    tint = Color(0xFFA5C3E6),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
+                Spacer(modifier = Modifier.width(14.dp))
 
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    if (isAnalyzing) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(120.dp),
-                            verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            CircularProgressIndicator(
-                                color = Color(0xFF4B7399),
-                                strokeWidth = 3.dp,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                "Calcul de l'évaluation Lichess & Rédaction du rapport IA...",
-                                fontSize = 12.sp,
-                                color = Color.Gray,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else {
-                        // Display Score badge
-                        val isPositive = stockfishEval.startsWith("+")
-                        val badgeBg = if (isPositive) Color(0x1E4CA288) else Color(0x1EC62828)
-                        val badgeColor = if (isPositive) Color(0xFF4CA288) else Color(0xFFEF9A9A)
-                        
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(badgeBg)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "Évaluation : $stockfishEval",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = badgeColor
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Styled Markdown Advice representation
-                        Text(
-                            text = coachAdvice,
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            lineHeight = 19.sp,
-                            modifier = Modifier.testTag("coach_advice_text")
-                        )
-                    }
+                Column {
+                    Text(
+                        text = if (isAnalyzing) "🧙‍♂️ Coach IA : Analyse vocale..." else "🧙‍♂️ Coach Vocal FOCUS+ Actif",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF4CA288)
+                    )
+                    Text(
+                        text = if (isAnalyzing) "Stockfish + Gemini évaluent en continu..." else "Cliquez sur l'icône pour répéter l'analyse",
+                        fontSize = 10.sp,
+                        color = Color.Gray,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
 
@@ -512,3 +457,55 @@ fun MoveChip(
         )
     }
 }
+
+@Composable
+fun AutoRepeatButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit
+) {
+    var isPressed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isPressed) {
+        if (isPressed && enabled) {
+            while (true) {
+                onClick()
+                delay(200) // 5 plies per second for fluid auto-forward and backward scrolling
+            }
+        }
+    }
+
+    val containerColor = if (enabled) {
+        if (isPressed) Color(0xFF32363C) else Color(0xFF1E2124)
+    } else {
+        Color(0xFF121415)
+    }
+
+    val contentColor = if (enabled) Color.White else Color.Gray
+
+    Box(
+        modifier = modifier
+            .height(48.dp) // Accessibility compliant touch targets >= 48.dp
+            .clip(RoundedCornerShape(8.dp))
+            .background(containerColor)
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    isPressed = true
+                    waitForUpOrCancellation()
+                    isPressed = false
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            content()
+        }
+    }
+}
+

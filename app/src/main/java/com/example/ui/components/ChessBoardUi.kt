@@ -50,7 +50,8 @@ fun ChessBoardUi(
     modifier: Modifier = Modifier,
     lastMoveTargetSquare: Int = -1,
     lastMoveQualityBadge: String? = null,
-    lastMoveQualityColor: Color = Color.Transparent
+    lastMoveQualityColor: Color = Color.Transparent,
+    isFlipped: Boolean = false
 ) {
     // --- Lichess Color Theme Palettes ---
     val context = LocalContext.current
@@ -82,10 +83,13 @@ fun ChessBoardUi(
             .shadow(6.dp)
             .testTag("chess_board_card")
     ) {
+        val rowRange = if (isFlipped) (7 downTo 0) else (0..7)
+        val colRange = if (isFlipped) (7 downTo 0) else (0..7)
+
         Column(modifier = Modifier.fillMaxSize()) {
-            for (r in 0..7) {
+            for (r in rowRange) {
                 Row(modifier = Modifier.weight(1f)) {
-                    for (c in 0..7) {
+                    for (c in colRange) {
                         val squareIdx = r * 8 + c
                         val piece = board[squareIdx]
                         val isDarkSquare = (r + c) % 2 == 1
@@ -117,8 +121,8 @@ fun ChessBoardUi(
                                 }
                                 .testTag("square_${r}_${c}")
                         ) {
-                            // --- File Numbers (8 to 1) on Left Column (c == 0) ---
-                            if (c == 0) {
+                            // --- File Numbers (8 to 1) on Left Column (c == 0 or c == 7) ---
+                            if (c == (if (isFlipped) 7 else 0)) {
                                 Text(
                                     text = (8 - r).toString(),
                                     fontSize = 10.sp,
@@ -130,8 +134,8 @@ fun ChessBoardUi(
                                 )
                             }
 
-                            // --- Rank Letters (a to h) on Bottom Row (r == 7) ---
-                            if (r == 7) {
+                            // --- Rank Letters (a to h) on Bottom Row (r == 7 or r == 0) ---
+                            if (r == (if (isFlipped) 0 else 7)) {
                                 Text(
                                     text = ('a' + c).toString(),
                                     fontSize = 10.sp,

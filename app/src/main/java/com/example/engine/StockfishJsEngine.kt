@@ -44,7 +44,7 @@ class StockfishJsEngine(private val context: Context) {
                     loadDataWithBaseURL("https://local.stockfish", getHtmlContent(), "text/html", "UTF-8", null)
                 }
                 Log.d("StockfishJsEngine", "WebView initialized successfully.")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e("StockfishJsEngine", "WebView creation failed", e)
                 _status.value = "ERROR: ${e.message}"
             }

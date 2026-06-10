@@ -11,6 +11,7 @@ data class LichessProfile(
     val bulletElo: Int,
     val rapidElo: Int,
     val classicalElo: Int,
+    val puzzleElo: Int = 1500,
     val winCount: Int,
     val lossCount: Int,
     val drawCount: Int,
