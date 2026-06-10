@@ -54,6 +54,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ChessGameEntity
 import com.example.ui.coach.ChessCoachViewModel
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import com.example.BuildConfig
 
 @Composable
 fun DashboardScreen(
@@ -64,6 +67,10 @@ fun DashboardScreen(
     val context = LocalContext.current
     val profile by viewModel.activeProfile.collectAsState()
     val games by viewModel.gamesList.collectAsState()
+
+    LaunchedEffect(Unit) {
+        viewModel.fetchDashboardInsights(BuildConfig.GEMINI_API_KEY)
+    }
 
     val safeProfile = profile ?: return
 
@@ -235,6 +242,36 @@ fun DashboardScreen(
                             .fillMaxWidth()
                             .height(120.dp)
                     )
+                }
+            }
+        }
+
+        // --- TACTICAL INSIGHTS CARD ---
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2124)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "💡 Analyse Tactique (Gemini)",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE2B65C)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (viewModel.isFetchingInsights) {
+                        Text("Analyse en cours...", fontSize = 12.sp, color = Color.Gray)
+                    } else {
+                        Text(
+                            text = viewModel.dashboardInsights ?: "Aucune information.",
+                            fontSize = 13.sp,
+                            color = Color.White
+                        )
+                    }
                 }
             }
         }

@@ -1,5 +1,7 @@
 package com.example
 
+import android.content.Intent
+import android.util.Log
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -58,9 +60,33 @@ class MainActivity : ComponentActivity() {
     // Modern Constructor viewModels delegation
     private val viewModel: ChessCoachViewModel by viewModels()
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        val uri = intent?.data
+        if (uri != null && "focusplus" == uri.scheme && "oauth" == uri.host) {
+            val code = uri.getQueryParameter("code")
+            if (code != null) {
+                Log.d("MainActivity", "Inbound Lichess OAuth request received with code")
+                viewModel.handleOAuthCallback(code) { success ->
+                    if (success) {
+                        Log.d("MainActivity", "Successfully logged in via Lichess OAuth!")
+                    } else {
+                        Log.e("MainActivity", "Failed to login via Lichess OAuth!")
+                    }
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleIntent(intent)
         setContent {
             MyApplicationTheme {
                 val profile by viewModel.activeProfile.collectAsState()

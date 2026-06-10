@@ -67,6 +67,7 @@ fun TrainingScreen(
     val puzzles by viewModel.practicePuzzles.collectAsState()
     val activePuzzle = viewModel.selectedPuzzle
     val isCompleted = viewModel.isDailyPuzzleCompleted
+    val geminiApiKey = com.example.BuildConfig.GEMINI_API_KEY ?: "MY_GEMINI_API_KEY"
     
     var activeTrainingTab by remember { mutableStateOf("puzzles") }
 
@@ -259,7 +260,7 @@ fun TrainingScreen(
                             isWhiteTurn = viewModel.isWhiteTurn,
                             boardTheme = viewModel.reactBoardTheme,
                             onSquareClick = { idx ->
-                                viewModel.handleSquareClick(idx, "KEY")
+                                viewModel.handleSquareClick(idx, geminiApiKey)
                             },
                             modifier = Modifier
                                 .fillMaxWidth(0.9f)
@@ -285,6 +286,77 @@ fun TrainingScreen(
                                 fontWeight = FontWeight.Medium,
                                 modifier = Modifier.testTag("puzzle_prompt_status")
                             )
+                        }
+
+                        // --- COACH ADVICE CARD FOR PUZZLES ---
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF16181A)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("coach_advice_card")
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0x224B7399)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("🧙‍♂️", fontSize = 20.sp)
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "Coach Assistant FOCUS+",
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            text = "Conseils & Stratégies Tactiques",
+                                            color = Color(0xFF4CA288),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                if (viewModel.isAnalyzing) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                                    ) {
+                                        androidx.compose.material3.CircularProgressIndicator(
+                                            color = Color(0xFF4B7399),
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "Le Coach rédige son conseil...",
+                                            fontSize = 12.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = viewModel.coachAdvice,
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp,
+                                        color = Color.White,
+                                        modifier = Modifier.testTag("coach_advice_text")
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))

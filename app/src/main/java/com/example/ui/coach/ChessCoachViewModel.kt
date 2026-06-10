@@ -2,6 +2,12 @@ package com.example.ui.coach
 
 import android.app.Application
 import android.util.Log
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.util.Base64
+import java.security.MessageDigest
+import kotlin.random.Random
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -59,15 +65,47 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     // --- Analytical Feedback States ---
     val stockfishJsEngine = StockfishJsEngine(application)
     var isLocalEngineMode by mutableStateOf(true) // Default to local Web Worker engine since user requested it!
+    fun toggleEngineMode() {
+        isLocalEngineMode = !isLocalEngineMode
+    }
     var localEngineStatus by mutableStateOf("Démarrage du Thread Stockfish.js...")
 
     var selectedGameId by mutableStateOf<String?>(null)
     var isAnalyzing by mutableStateOf(false)
     var isGeneratingSummary by mutableStateOf(false)
     var gameSummaryReport by mutableStateOf<String?>(null)
+    
+    // Dashboard Insights
+    var isFetchingInsights by mutableStateOf(false)
+    var dashboardInsights by mutableStateOf<String?>(null)
+
+    fun fetchDashboardInsights(apiKey: String) {
+        isFetchingInsights = true
+        viewModelScope.launch {
+            val games = gamesList.value
+            if (games.isEmpty()) {
+                dashboardInsights = "Aucune partie récente pour analyser les blunders."
+                isFetchingInsights = false
+                return@launch
+            }
+            
+            // Analyze the last 3 games for tactics
+            val pgnSummary = games.take(3).joinToString("\n") { it.moves }
+            val result = repository.getGeminiGameSummary(
+                pgn = pgnSummary,
+                evalHistory = "Performance Analysis",
+                apiKey = apiKey
+            )
+            dashboardInsights = result.getOrDefault("Impossible d'analyser les tactiques via Gemini.")
+            isFetchingInsights = false
+        }
+    }
+    
     var stockfishEval by mutableStateOf("0.0")
     var coachAdvice by mutableStateOf("Bonjour ! Je suis votre coach FOCUS+. Sélectionnez une partie pour commencer ou lancez une analyse sur l'échiquier !")
     var userLoginInput by mutableStateOf("")
+    var customClientId by mutableStateOf("")
+    var cachedAnalyses by mutableStateOf<Map<Int, com.example.data.model.MoveAnalysis>>(emptyMap())
 
     // Accessibility & Modern Lichess Toggles
     var isBlindAccessibilityMode by mutableStateOf(false)
@@ -169,6 +207,79 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    private fun generateCodeVerifier(): String {
+        val allowedChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+        return (1..60)
+            .map { allowedChars[Random.nextInt(allowedChars.length)] }
+            .joinToString("")
+    }
+
+    private fun generateCodeChallenge(verifier: String): String {
+        val bytes = verifier.toByteArray(Charsets.US_ASCII)
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashedBytes = digest.digest(bytes)
+        return Base64.encodeToString(hashedBytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+    }
+
+    fun startLichessOAuth(context: Context, clientId: String) {
+        val verifier = generateCodeVerifier()
+        val challenge = generateCodeChallenge(verifier)
+        
+        // Save code_verifier to SharedPreferences to retrieve it after redirection
+        val prefs = context.getSharedPreferences("lichess_oauth_prefs", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("code_verifier", verifier)
+            .putString("client_id_used", clientId)
+            .apply()
+            
+        val authorizationUrl = Uri.parse("https://lichess.org/oauth/authorize").buildUpon()
+            .appendQueryParameter("response_type", "code")
+            .appendQueryParameter("client_id", clientId.trim())
+            .appendQueryParameter("redirect_uri", "focusplus://oauth")
+            .appendQueryParameter("code_challenge_method", "S256")
+            .appendQueryParameter("code_challenge", challenge)
+            .appendQueryParameter("scope", "preference:read")
+            .build()
+            
+        Log.d("ChessCoachViewModel", "Launching Lichess OAuth authorize URL: $authorizationUrl")
+        val intent = Intent(Intent.ACTION_VIEW, authorizationUrl).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    }
+
+    fun handleOAuthCallback(code: String, onCallback: (Boolean) -> Unit) {
+        val context = getApplication<Application>()
+        val prefs = context.getSharedPreferences("lichess_oauth_prefs", Context.MODE_PRIVATE)
+        val verifier = prefs.getString("code_verifier", null)
+        val clientId = prefs.getString("client_id_used", "focus-plus-chess-coach") ?: "focus-plus-chess-coach"
+        
+        if (verifier == null) {
+            Log.e("ChessCoachViewModel", "Error: Saved code_verifier not found in SharedPreferences!")
+            onCallback(false)
+            return
+        }
+        
+        isAnalyzing = true
+        coachAdvice = "Connexion via Lichess OAuth en cours..."
+        viewModelScope.launch {
+            val result = repository.exchangeOAuthAndLoadProfile(
+                code = code,
+                codeVerifier = verifier,
+                clientId = clientId.trim(),
+                redirectUri = "focusplus://oauth"
+            )
+            isAnalyzing = false
+            if (result.isSuccess) {
+                coachAdvice = "Connexion OAuth réussie ! Votre profil et vos parties ont été importés."
+                onCallback(true)
+            } else {
+                coachAdvice = "Erreur de connexion OAuth. Veuillez réessayer."
+                onCallback(false)
+            }
+        }
+    }
+
     fun logout() {
         viewModelScope.launch {
             repository.clearActiveProfile()
@@ -237,13 +348,48 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         activeMoveIndex = -1
         gameSummaryReport = null
         
-        coachAdvice = "Partie chargée : ${game.whiteUser} ELO ${game.whiteElo} contre ${game.blackUser} ELO ${game.blackElo}. Cliquez sur les coups à droite pour naviguer et solliciter l'IA !"
+        coachAdvice = "Partie chargée : ${game.whiteUser} contre ${game.blackUser}. Analyse anticipée en arrière-plan..."
         stockfishEval = if (game.winner == "white") "+Mat" else if (game.winner == "black") "-Mat" else "Égalité"
         
         originalBoardState = ChessEngine.parseFen(game.initialFen)
         currentBoardState = originalBoardState.copyOf()
         displayedFen = game.initialFen
         isWhiteTurn = true
+
+        // Clean cache
+        cachedAnalyses = emptyMap()
+
+        // BACKROUND ANTICIPATORY ANALYSIS CALL!
+        val apiKey = com.example.BuildConfig.GEMINI_API_KEY ?: "MY_GEMINI_API_KEY"
+        triggerAnticipatoryAnalysis(movesList, apiKey)
+    }
+
+    fun triggerAnticipatoryAnalysis(moves: List<String>, apiKey: String) {
+        if (moves.isEmpty()) return
+        isAnalyzing = true
+        viewModelScope.launch {
+            try {
+                val result = repository.getAnticipatedMoveAnalyses(moves, apiKey)
+                if (result.isSuccess) {
+                    val rawMap = result.getOrNull() ?: emptyMap()
+                    cachedAnalyses = rawMap
+                    coachAdvice = "Analyse anticipée terminée avec succès ! La navigation est maintenant instantanée sans latence."
+                } else {
+                    Log.e("ChessCoachViewModel", "Anticipatory pre-analysis failed: ${result.exceptionOrNull()?.message}")
+                    coachAdvice = "Analyse anticipée indisponible. L'analyse en direct est activée pour votre navigation."
+                }
+            } catch (e: Exception) {
+                Log.e("ChessCoachViewModel", "Failed to run background pre-analysis", e)
+            } finally {
+                isAnalyzing = false
+            }
+        }
+    }
+
+    private fun parseKeyToMoveIndex(key: String): Int {
+        val digits = key.filter { it.isDigit() }
+        val num = digits.toIntOrNull() ?: return -1
+        return num - 1
     }
 
     fun selectHistoryMove(index: Int, apiKey: String) {
@@ -258,15 +404,11 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         var whiteTurn = true
         for (i in 0..index) {
             val moveStr = moveHistoryList[i]
-            if (moveStr.length >= 4) {
-                val fromSq = ChessEngine.algebraicToSquare(moveStr.substring(0, 2))
-                val toSq = ChessEngine.algebraicToSquare(moveStr.substring(2, 4))
-                if (fromSq != -1 && toSq != -1) {
-                    val result = ChessEngine.executeMove(board, fromSq, toSq)
-                    board = result.first
-                    whiteTurn = !whiteTurn
-                }
+            val result = ChessEngine.parseAndExecuteAnyMove(board, moveStr, whiteTurn)
+            if (result != null) {
+                board = result.first
             }
+            whiteTurn = !whiteTurn
         }
         currentBoardState = board
         isWhiteTurn = whiteTurn
@@ -276,8 +418,23 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
             playMoveSound(boardBefore, currentBoardState, whiteTurn)
         }
         
-        // Trigger Engine Evaluation + AI coaching for this move!
-        analyzePosition(moveHistoryList.getOrNull(index) ?: "Début", apiKey)
+        if (index == -1) {
+            coachAdvice = "Prêt à démarrer ! Choisissez un coup ci-dessus."
+            stockfishEval = "0.0"
+            return
+        }
+
+        // CHECK CACHED ANALYSES FIRST
+        val analysis = cachedAnalyses[index]
+        if (analysis != null) {
+            coachAdvice = analysis.comment
+            val evalVal = analysis.evaluation
+            stockfishEval = if (evalVal >= 0) "+${String.format(java.util.Locale.US, "%.1f", evalVal)}" else String.format(java.util.Locale.US, "%.1f", evalVal)
+            speakAdvice(analysis.comment)
+        } else {
+            // Fallback: Trigger live Engine Evaluation + AI coaching for this move
+            analyzePosition(moveHistoryList.getOrNull(index) ?: "Début", apiKey)
+        }
     }
 
     fun handleSquareClick(index: Int, apiKey: String) {
@@ -340,52 +497,198 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         analyzePosition(moveCode, apiKey)
     }
 
+    private fun getFrenchMoveNotation(boardBefore: CharArray, from: Int, to: Int): String {
+        if (from !in 0..63 || to !in 0..63) return ""
+        val piece = boardBefore[from]
+        val pieceLetter = when (piece.lowercaseChar()) {
+            'k' -> "R"
+            'q' -> "D"
+            'r' -> "T"
+            'b' -> "F"
+            'n' -> "C"
+            else -> "" // Pawn
+        }
+        val colFrom = from % 8
+        val colTo = to % 8
+        if (piece.lowercaseChar() == 'k' && Math.abs(colFrom - colTo) == 2) {
+            return if (colTo == 6) "O-O" else "O-O-O"
+        }
+        val toSquareAlgebraic = ChessEngine.getSquareAlgebraic(to / 8, to % 8)
+        return "$pieceLetter$toSquareAlgebraic"
+    }
+
+    private fun classifyMove(
+        scoreBefore: Double,
+        scoreAfter: Double,
+        playedMove: String,
+        bestMoveUci: String?,
+        isWhiteBefore: Boolean
+    ): String {
+        if (bestMoveUci != null && playedMove.equals(bestMoveUci, ignoreCase = true)) {
+            return "Excellent"
+        }
+        
+        val diff = if (isWhiteBefore) {
+            scoreAfter - scoreBefore
+        } else {
+            scoreBefore - scoreAfter
+        }
+        
+        return when {
+            diff <= -2.0 -> "Blunder"
+            diff <= -1.0 -> "Mistake"
+            diff <= -0.5 -> "Inaccuracy"
+            diff >= 0.0 -> "Excellent"
+            else -> "Good Move"
+        }
+    }
+
+    private suspend fun getEvaluationForFen(fen: String, useLocalFallback: Boolean = true): com.example.data.repository.CloudEvalData {
+        val cloudData = try {
+            repository.fetchLichessCloudEval(fen)
+        } catch (e: Exception) {
+            null
+        }
+        if (cloudData != null) {
+            return cloudData
+        }
+        if (useLocalFallback) {
+            stockfishJsEngine.evaluate(fen)
+            kotlinx.coroutines.delay(1000)
+            val evalStr = stockfishJsEngine.evaluation.value
+            val bestMove = stockfishJsEngine.bestMove.value.ifEmpty { null }
+            
+            var scoreVal = 0.0
+            try {
+                if (evalStr.contains("Mat") || evalStr.contains("Mate")) {
+                    scoreVal = if (evalStr.contains("-")) -100.0 else 100.0
+                } else {
+                    scoreVal = evalStr.replace("+", "").toDoubleOrNull() ?: 0.0
+                }
+            } catch (e: Exception) {}
+            
+            return com.example.data.repository.CloudEvalData(score = evalStr, scoreVal = scoreVal, bestMove = bestMove)
+        }
+        return com.example.data.repository.CloudEvalData(score = "0.0", scoreVal = 0.0, bestMove = null)
+    }
+
     private fun analyzePosition(lastMove: String, apiKey: String) {
-        val fenStr = displayedFen
         isAnalyzing = true
         viewModelScope.launch {
-            val eval = if (isLocalEngineMode) {
-                // Request evaluation from local Web Worker WebView
-                stockfishJsEngine.evaluate(fenStr)
-                // Wait briefly for the local engine thread to compute
-                kotlinx.coroutines.delay(1000)
-                stockfishJsEngine.evaluation.value
-            } else {
-                // Fetch Cloud Stockfish Eval
-                val engineResult = repository.fetchStockfishEvaluation(fenStr)
-                engineResult.getOrDefault("0.0")
-            }
-            
-            stockfishEval = eval
-
-            // Record evaluation in the evaluations list matching the active move index
-            val currentIdx = activeMoveIndex
-            if (currentIdx >= 0) {
-                val listCopy = moveEvaluationsList.toMutableList()
-                while (listCopy.size <= currentIdx) {
-                    listCopy.add("Non analysé")
+            try {
+                val currentIndex = activeMoveIndex
+                val history = moveHistoryList
+                
+                if (currentIndex < 0) {
+                    coachAdvice = "Bonjour ! Je suis votre coach FOCUS+. Jouez un coup ou sélectionnez une partie pour commencer !"
+                    isAnalyzing = false
+                    return@launch
                 }
-                listCopy[currentIdx] = eval
-                moveEvaluationsList = listCopy
+                
+                // 1. Reconstruct board BEFORE the move
+                var boardBefore = originalBoardState.copyOf()
+                var whiteBefore = true
+                for (i in 0 until currentIndex) {
+                    val moveStr = history.getOrNull(i) ?: break
+                    if (moveStr.length >= 4) {
+                        val fromSq = ChessEngine.algebraicToSquare(moveStr.substring(0, 2))
+                        val toSq = ChessEngine.algebraicToSquare(moveStr.substring(2, 4))
+                        if (fromSq != -1 && toSq != -1) {
+                            val result = ChessEngine.executeMove(boardBefore, fromSq, toSq)
+                            boardBefore = result.first
+                            whiteBefore = !whiteBefore
+                        }
+                    }
+                }
+                val fenBefore = ChessEngine.toFen(boardBefore, whiteBefore)
+                
+                // 2. Reconstruct board AFTER the move
+                var boardAfter = boardBefore.copyOf()
+                var whiteAfter = whiteBefore
+                val latestMoveStr = history.getOrNull(currentIndex)
+                var lastFrom = -1
+                var lastTo = -1
+                if (latestMoveStr != null && latestMoveStr.length >= 4) {
+                    lastFrom = ChessEngine.algebraicToSquare(latestMoveStr.substring(0, 2))
+                    lastTo = ChessEngine.algebraicToSquare(latestMoveStr.substring(2, 4))
+                    if (lastFrom != -1 && lastTo != -1) {
+                        val result = ChessEngine.executeMove(boardAfter, lastFrom, lastTo)
+                        boardAfter = result.first
+                        whiteAfter = !whiteAfter
+                    }
+                }
+                val fenAfter = ChessEngine.toFen(boardAfter, whiteAfter)
+                
+                // 3. Query Lichess evaluations
+                val scoreBefore = getEvaluationForFen(fenBefore)
+                val scoreAfter = getEvaluationForFen(fenAfter)
+                
+                // Determine Played French move & Best French move
+                val playedFrench = if (lastFrom != -1 && lastTo != -1) {
+                    getFrenchMoveNotation(boardBefore, lastFrom, lastTo)
+                } else {
+                    lastMove
+                }
+                
+                val bestMoveUci = scoreBefore.bestMove
+                val bestFrench = if (bestMoveUci != null && bestMoveUci.length >= 4) {
+                    try {
+                        val bFrom = ChessEngine.algebraicToSquare(bestMoveUci.substring(0, 2))
+                        val bTo = ChessEngine.algebraicToSquare(bestMoveUci.substring(2, 4))
+                        if (bFrom != -1 && bTo != -1) {
+                            getFrenchMoveNotation(boardBefore, bFrom, bTo)
+                        } else {
+                            bestMoveUci
+                        }
+                    } catch (e: Exception) {
+                        bestMoveUci
+                    }
+                } else {
+                    "Aucun"
+                }
+                
+                // Classify Move Type
+                val moveType = classifyMove(
+                    scoreBefore = scoreBefore.scoreVal,
+                    scoreAfter = scoreAfter.scoreVal,
+                    playedMove = latestMoveStr ?: "",
+                    bestMoveUci = bestMoveUci,
+                    isWhiteBefore = whiteBefore
+                )
+                
+                // Format raw string matching "[MODE: ANALYSE] Coup : Ff4 | Type : Blunder | Éval : +1.2 -> -2.5 | Meilleur coup : O-O | FEN : ..."
+                val formattedLichessData = "[MODE: ANALYSE] Coup : $playedFrench | Type : $moveType | Éval : ${scoreBefore.score} -> ${scoreAfter.score} | Meilleur coup : $bestFrench | FEN : $fenAfter"
+                
+                // Update UI states
+                stockfishEval = scoreAfter.score
+                
+                val currentIdx = activeMoveIndex
+                if (currentIdx >= 0) {
+                    val listCopy = moveEvaluationsList.toMutableList()
+                    while (listCopy.size <= currentIdx) {
+                        listCopy.add("Non analysé")
+                    }
+                    listCopy[currentIdx] = scoreAfter.score
+                    moveEvaluationsList = listCopy
+                }
+                
+                // 4. Send Lichess crude analytics to Gemini Coach API with the strict prompt
+                val aiResult = repository.getCoachInteractiveExplanation(
+                    lichessInput = formattedLichessData,
+                    apiKey = apiKey
+                )
+                
+                isAnalyzing = false
+                coachAdvice = aiResult.getOrDefault("Coup joué ! Demandez l'évaluation de l'IA pour approfondir la tactique.")
+                
+                // Speak Coach commentary out loud!
+                speakAdvice(coachAdvice)
+                
+            } catch (e: Exception) {
+                Log.e("ChessCoachViewModel", "Interactive analysis failure", e)
+                isAnalyzing = false
+                coachAdvice = "Erreur d'analyse. Veuillez réessayer."
             }
-            
-            // 2. Query Coach Gemini AI with the parsed evaluation and PGN context
-            val pgn = getPgnString()
-            val evalHistory = getEvaluationsHistoryString()
-
-            val aiResult = repository.getGeminiCoaching(
-                fen = fenStr,
-                lastMove = lastMove,
-                isWhiteTurn = isWhiteTurn,
-                evaluation = eval,
-                pgn = pgn,
-                evalHistory = evalHistory,
-                apiKey = apiKey
-            )
-            isAnalyzing = false
-            coachAdvice = aiResult.getOrDefault("Coup joué ! Demandez l'évaluation de l'IA pour approfondir la tactique.")
-            // Speak Coach commentary out loud!
-            speakAdvice(coachAdvice)
         }
     }
 
@@ -442,6 +745,9 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun resetBoard() {
+        selectedPuzzle = null
+        isDailyPuzzleCompleted = false
+        puzzleMovesPlayed = emptyList()
         originalBoardState = ChessEngine.parseFen(ChessEngine.START_FEN)
         currentBoardState = originalBoardState.copyOf()
         selectedSquare = -1
@@ -457,6 +763,32 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     // --- Puzzle Solver Engine Logic ---
+    fun triggerPuzzleCoachAnalysis(status: String, playedMove: String, whyItFails: String, apiKey: String) {
+        val puzzle = selectedPuzzle ?: return
+        isAnalyzing = true
+        coachAdvice = "Analyse en cours..."
+        viewModelScope.launch {
+            try {
+                val solutionMoves = puzzle.solution.split(" ")
+                val solutionStr = solutionMoves.firstOrNull() ?: "Aucune"
+                
+                // Format: [MODE: PUZZLE] Statut : Échec | Thème : Fork | Coup tenté : Dxf7 | Pourquoi ça rate : La Tour g7 protège f7 | Solution Stockfish : Cg6+
+                val formattedStr = "[MODE: PUZZLE] Statut : $status | Thème : ${puzzle.themes} | Coup tenté : $playedMove | Pourquoi ça rate : $whyItFails | Solution Stockfish : $solutionStr"
+                
+                val aiResult = repository.getCoachInteractiveExplanation(
+                    lichessInput = formattedStr,
+                    apiKey = apiKey
+                )
+                isAnalyzing = false
+                coachAdvice = aiResult.getOrDefault("Conseils d'analyse non disponibles.")
+                speakAdvice(coachAdvice)
+            } catch (e: Exception) {
+                isAnalyzing = false
+                Log.e("ChessCoachViewModel", "triggerPuzzleCoachAnalysis failed", e)
+            }
+        }
+    }
+
     fun loadPuzzle(puzzle: PuzzleEntity) {
         selectedPuzzle = puzzle
         isDailyPuzzleCompleted = false
@@ -477,6 +809,15 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         selectedSquare = -1
         possibleMoves = emptyList()
         puzzleMovesPlayed = emptyList()
+
+        // Trigger initial coach feedback with Nouveau status!
+        val apiKey = com.example.BuildConfig.GEMINI_API_KEY ?: "MY_GEMINI_API_KEY"
+        triggerPuzzleCoachAnalysis(
+            status = "Nouveau",
+            playedMove = "Aucun",
+            whyItFails = "Aucune erreur pour l'instant. L'utilisateur commence le puzzle.",
+            apiKey = apiKey
+        )
     }
 
     private fun handlePuzzleSquareClick(index: Int) {
@@ -550,9 +891,24 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
                     }
                 } else {
                     // Wrong move!
+                    val playedFrench = try {
+                        getFrenchMoveNotation(currentBoardState, fromSq, index)
+                    } catch (e: Exception) {
+                        moveStr
+                    }
+                    
                     puzzleProgressMessage = "Coup imprécis. Essayez d'analyser une autre suite !"
-                    speakAdvice("Ce n'est pas la meilleure ligne de jeu. Cherchez encore !")
                     ChessSoundManager.playCheck() // buzz alert sound
+                    
+                    // Trigger Puzzle Coach analysis for Error / Failure!
+                    val apiKey = com.example.BuildConfig.GEMINI_API_KEY ?: "MY_GEMINI_API_KEY"
+                    triggerPuzzleCoachAnalysis(
+                        status = "Échec",
+                        playedMove = playedFrench,
+                        whyItFails = "Ce n'est pas le coup attendu de la solution tactique.",
+                        apiKey = apiKey
+                    )
+                    
                     selectedSquare = -1
                     possibleMoves = emptyList()
                 }

@@ -84,7 +84,29 @@ interface LichessApiService {
 
     @GET("api/puzzle/daily")
     suspend fun getDailyPuzzle(): ResponseBody // Returns daily puzzle JSON
+
+    @retrofit2.http.POST("api/token")
+    @retrofit2.http.FormUrlEncoded
+    suspend fun exchangeOAuthCode(
+        @retrofit2.http.Field("grant_type") grantType: String,
+        @retrofit2.http.Field("client_id") clientId: String,
+        @retrofit2.http.Field("code") code: String,
+        @retrofit2.http.Field("redirect_uri") redirectUri: String,
+        @retrofit2.http.Field("code_verifier") codeVerifier: String
+    ): OAuthTokenResponse
+
+    @GET("api/account")
+    suspend fun getAuthenticatedUser(
+        @Header("Authorization") authHeader: String
+    ): LichessUserProfileResponse
 }
+
+@JsonClass(generateAdapter = true)
+data class OAuthTokenResponse(
+    @Json(name = "access_token") val accessToken: String,
+    @Json(name = "token_type") val tokenType: String = "",
+    @Json(name = "expires_in") val expiresIn: Long = 0
+)
 
 object LichessClient {
     private const val BASE_URL = "https://lichess.org/"

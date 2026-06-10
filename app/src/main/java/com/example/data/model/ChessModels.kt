@@ -14,7 +14,8 @@ data class LichessProfile(
     val winCount: Int,
     val lossCount: Int,
     val drawCount: Int,
-    val lastUpdated: Long = System.currentTimeMillis()
+    val lastUpdated: Long = System.currentTimeMillis(),
+    val accessToken: String? = null
 )
 
 @Entity(tableName = "chess_games")
@@ -45,3 +46,9 @@ data class PuzzleEntity(
     val userSolves: Int = 0, // 0 = not tried, 1 = correct, -1 = incorrect
     val addedDate: Long = System.currentTimeMillis()
 )
+
+data class MoveAnalysis(
+    val comment: String,
+    val evaluation: Double // absolute from white's perspective
+)
+

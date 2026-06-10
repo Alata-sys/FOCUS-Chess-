@@ -70,6 +70,9 @@ fun ChessBoardUi(
     // Lichess Translucent Yellow Highlight Color for Selected and Active Pieces
     val selectionColor = Color(0x90BAC141)
 
+    val whiteKingInCheck = remember(board) { ChessEngine.isKingInCheck(board, true) }
+    val blackKingInCheck = remember(board) { ChessEngine.isKingInCheck(board, false) }
+
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = darkSquareColor),
@@ -90,9 +93,14 @@ fun ChessBoardUi(
                         val squareBaseColor = if (isDarkSquare) darkSquareColor else lightSquareColor
                         val isSelected = selectedSquare == squareIdx
                         val isPossible = squareIdx in possibleMoves
+                        val isKingInCheckSquare = (piece == 'K' && whiteKingInCheck) || (piece == 'k' && blackKingInCheck)
                         
-                        // Apply selection highlight layer on top of base square color
-                        val displayColor = if (isSelected) selectionColor else squareBaseColor
+                        // Apply selection highlight layer, or check highlight, on top of base square color
+                        val displayColor = when {
+                            isKingInCheckSquare -> Color(0xFFD32F2F) // Lichess red glow for check alerts!
+                            isSelected -> selectionColor
+                            else -> squareBaseColor
+                        }
 
                         Box(
                             modifier = Modifier

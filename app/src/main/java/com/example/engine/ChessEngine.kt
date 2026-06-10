@@ -273,6 +273,171 @@ object ChessEngine {
     }
 
     /**
+     * Universal move parser and executor. Supporting standard coordinate format (e.g., "e2e4")
+     * and Standard Algebraic Notation/SAN (e.g., "e4", "Nf3", "exd5", "Bxf7+", "O-O", "e8=Q")
+     */
+    fun parseAndExecuteAnyMove(board: CharArray, moveStr: String, isWhite: Boolean): Pair<CharArray, String>? {
+        val nextBoard = board.copyOf()
+        val clean = moveStr.replace("+", "").replace("#", "").replace("!", "").replace("?", "").trim()
+
+        if (clean.isEmpty()) return null
+
+        // 1. Check Kingside Castling
+        if (clean.equals("O-O", ignoreCase = true) || clean.equals("0-0", ignoreCase = true)) {
+            if (isWhite) {
+                if (nextBoard[60] == 'K') nextBoard[60] = '.'
+                nextBoard[62] = 'K'
+                if (nextBoard[63] == 'R') nextBoard[63] = '.'
+                nextBoard[61] = 'R'
+            } else {
+                if (nextBoard[4] == 'k') nextBoard[4] = '.'
+                nextBoard[6] = 'k'
+                if (nextBoard[7] == 'r') nextBoard[7] = '.'
+                nextBoard[5] = 'r'
+            }
+            return nextBoard to moveStr
+        }
+
+        // 2. Check Queenside Castling
+        if (clean.equals("O-O-O", ignoreCase = true) || clean.equals("0-0-0", ignoreCase = true)) {
+            if (isWhite) {
+                if (nextBoard[60] == 'K') nextBoard[60] = '.'
+                nextBoard[58] = 'K'
+                if (nextBoard[56] == 'R') nextBoard[56] = '.'
+                nextBoard[59] = 'R'
+            } else {
+                if (nextBoard[4] == 'k') nextBoard[4] = '.'
+                nextBoard[2] = 'k'
+                if (nextBoard[0] == 'r') nextBoard[0] = '.'
+                nextBoard[3] = 'r'
+            }
+            return nextBoard to moveStr
+        }
+
+        // 3. Check Coordinate Moves (e.g., "e2e4")
+        if (clean.length == 4 && 
+            clean[0] in 'a'..'h' && clean[1] in '1'..'8' && 
+            clean[2] in 'a'..'h' && clean[3] in '1'..'8') {
+            val fromSq = algebraicToSquare(clean.substring(0, 2))
+            val toSq = algebraicToSquare(clean.substring(2, 4))
+            if (fromSq != -1 && toSq != -1) {
+                val piece = nextBoard[fromSq]
+                nextBoard[toSq] = piece
+                nextBoard[fromSq] = '.'
+
+                // Handle secondary rook movement for castling represented in coords
+                if (piece == 'K' && fromSq == 60 && toSq == 62) {
+                    nextBoard[61] = 'R'; nextBoard[63] = '.'
+                } else if (piece == 'K' && fromSq == 60 && toSq == 58) {
+                    nextBoard[59] = 'R'; nextBoard[56] = '.'
+                } else if (piece == 'k' && fromSq == 4 && toSq == 6) {
+                    nextBoard[5] = 'r'; nextBoard[7] = '.'
+                } else if (piece == 'k' && fromSq == 4 && toSq == 2) {
+                    nextBoard[3] = 'r'; nextBoard[0] = '.'
+                }
+
+                // Handle promotion represented in coords
+                if (piece == 'P' && toSq / 8 == 0) {
+                    nextBoard[toSq] = 'Q'
+                } else if (piece == 'p' && toSq / 8 == 7) {
+                    nextBoard[toSq] = 'q'
+                }
+
+                return nextBoard to moveStr
+            }
+        }
+
+        // 4. Check Standard Algebraic Notation (SAN)
+        var sanClean = clean.replace("x", "") // remove capture tag
+        
+        // Extract promotion piece if present (e.g., "e8=Q" or "e8Q")
+        var promoteChar: Char? = null
+        if (sanClean.contains("=")) {
+            val idx = sanClean.indexOf("=")
+            if (idx + 1 < sanClean.length) {
+                promoteChar = sanClean[idx + 1]
+            }
+            sanClean = sanClean.substring(0, idx)
+        } else if (sanClean.length >= 3 && sanClean.last().isUpperCase() && (sanClean.last() == 'Q' || sanClean.last() == 'R' || sanClean.last() == 'B' || sanClean.last() == 'N')) {
+            promoteChar = sanClean.last()
+            sanClean = sanClean.dropLast(1)
+        }
+
+        if (sanClean.length < 2) return null
+        val last2 = sanClean.takeLast(2)
+        val toSq = algebraicToSquare(last2)
+        if (toSq == -1) return null
+
+        val firstChar = sanClean[0]
+        val isPieceMove = firstChar.isUpperCase()
+        val pieceType = if (isPieceMove) firstChar.lowercaseChar() else 'p'
+        val targetPieceChar = if (isWhite) pieceType.uppercaseChar() else pieceType.lowercaseChar()
+
+        // Extract any extra file (col) or rank (row) disambiguation markers
+        var fileClue: Char? = null
+        var rankClue: Char? = null
+
+        if (!isPieceMove) {
+            // Pauw capture like "exd5" (cleaned to "ed5") starts with the starting file
+            if (sanClean.length > 2) {
+                val first = sanClean[0]
+                if (first in 'a'..'h') {
+                    fileClue = first
+                }
+            }
+        } else {
+            // Piece movement: "Nbd2" -> clue is "b"
+            val clueStr = sanClean.drop(1).dropLast(2)
+            for (char in clueStr) {
+                if (char in 'a'..'h') fileClue = char
+                if (char in '1'..'8') rankClue = char
+            }
+        }
+
+        // Search candidates
+        val candidates = mutableListOf<Int>()
+        for (idx in 0..63) {
+            if (board[idx] == targetPieceChar) {
+                val possible = findPossibleMoves(board, idx)
+                if (toSq in possible) {
+                    candidates.add(idx)
+                }
+            }
+        }
+
+        val filtered = candidates.filter { idx ->
+            val col = idx % 8
+            val row = idx / 8
+            val colChar = 'a' + col
+            val rowChar = '8' - row
+            var ok = true
+            if (fileClue != null && colChar != fileClue) ok = false
+            if (rankClue != null && rowChar != rankClue) ok = false
+            ok
+        }
+
+        if (filtered.isEmpty()) return null
+        val fromSq = filtered[0]
+
+        // Execute move
+        nextBoard[toSq] = targetPieceChar
+        nextBoard[fromSq] = '.'
+
+        // En passant capture cleanup
+        if (pieceType == 'p' && fileClue != null && board[toSq] == '.') {
+            val capturedPawnSquare = (fromSq / 8) * 8 + (toSq % 8)
+            nextBoard[capturedPawnSquare] = '.'
+        }
+
+        // Apply promotion
+        if (promoteChar != null) {
+            nextBoard[toSq] = if (isWhite) promoteChar.uppercaseChar() else promoteChar.lowercaseChar()
+        }
+
+        return nextBoard to moveStr
+    }
+
+    /**
      * Check if a king (white if checkWhiteKing is true, otherwise black) is in check.
      */
     fun isKingInCheck(board: CharArray, checkWhiteKing: Boolean): Boolean {
