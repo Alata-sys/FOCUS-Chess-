@@ -67,12 +67,10 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     var activeMoveIndex by mutableStateOf(-1)
 
     // --- Analytical Feedback States ---
-    val engineManager = com.example.engine.EngineManager.getInstance(application)
     val stockfishJsEngine = StockfishJsEngine(application)
-    var isLocalEngineMode by mutableStateOf(engineManager.activeEngineType.value == com.example.engine.AnalysisEngineType.STOCKFISH_LOCAL)
+    var isLocalEngineMode by mutableStateOf(true) // Default to local Web Worker engine since user requested it!
     fun toggleEngineMode() {
-        val nextType = if (isLocalEngineMode) com.example.engine.AnalysisEngineType.LICHESS else com.example.engine.AnalysisEngineType.STOCKFISH_LOCAL
-        engineManager.setActiveEngine(nextType)
+        isLocalEngineMode = !isLocalEngineMode
     }
     var localEngineStatus by mutableStateOf("Démarrage du Thread Stockfish.js...")
 
@@ -202,12 +200,6 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
                     "INITIALIZING" -> "Démarrage du Thread Stockfish.js..."
                     else -> status
                 }
-            }
-        }
-
-        viewModelScope.launch {
-            engineManager.activeEngineType.collect { type ->
-                isLocalEngineMode = (type == com.example.engine.AnalysisEngineType.STOCKFISH_LOCAL)
             }
         }
 

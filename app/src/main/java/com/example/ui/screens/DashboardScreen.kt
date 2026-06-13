@@ -52,7 +52,6 @@ fun DashboardScreen(
     val context = LocalContext.current
     val profile by viewModel.activeProfile.collectAsState()
     val games by viewModel.gamesList.collectAsState()
-    val practicePuzzlesList by viewModel.practicePuzzles.collectAsState(initial = emptyList())
 
     var selectedCadence by remember { mutableStateOf("blitz") }
 
@@ -69,45 +68,15 @@ fun DashboardScreen(
             .padding(horizontal = 16.dp)
             .testTag("dashboard_screen_root")
     ) {
-        item {
-            var showSettingsDialog by remember { mutableStateOf(false) }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 16.dp, bottom = 4.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                IconButton(
-                    onClick = { showSettingsDialog = true },
-                    modifier = Modifier.testTag("dashboard_settings_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Paramètres du moteur",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-
-            if (showSettingsDialog) {
-                EngineSettingsDialog(
-                    onDismiss = { showSettingsDialog = false },
-                    viewModel = viewModel
-                )
-            }
-        }
-
         // --- ELOS GRID, SPARKLINE CHART, AND WINRATE STATISTICS ---
         item {
             val cadences = remember(safeProfile) {
                 listOf(
+                    CadenceConfig("puzzles", "Puzzles", safeProfile.puzzleElo, Color(0xFFFFD54F)) { PureLichessIconTarget(it) },
                     CadenceConfig("bullet", "Bullet", safeProfile.bulletElo, Color(0xFFFF6D00)) { PureLichessIconBullet(it) },
                     CadenceConfig("blitz", "Blitz", safeProfile.blitzElo, Color(0xFFFFEB3B)) { PureLichessIconBlitz(it) },
                     CadenceConfig("rapid", "Rapide", safeProfile.rapidElo, Color(0xFF00E676)) { PureLichessIconRapid(it) },
-                    CadenceConfig("classical", "Classique", safeProfile.classicalElo, Color(0xFF00B0FF)) { PureLichessIconClassical(it) },
-                    CadenceConfig("puzzles", "Puzzles", safeProfile.puzzleElo, Color(0xFFFFD54F)) { PureLichessIconTarget(it) }
+                    CadenceConfig("classical", "Classique", safeProfile.classicalElo, Color(0xFF00B0FF)) { PureLichessIconClassical(it) }
                 )
             }
 
@@ -116,45 +85,32 @@ fun DashboardScreen(
             }
 
             // Custom local Elo progression computation over latest 10 matches
-            val activeEloHistory = remember(selectedCadence, activeConfig.rating, games, safeProfile.username, safeProfile.puzzleElo) {
-                if (selectedCadence == "puzzles") {
-                    val deltas = listOf(12, -8, 15, -10, 18, -5, 14, 8, -12, 25)
-                    var current = safeProfile.puzzleElo
-                    val list = mutableListOf<Int>()
-                    list.add(current)
-                    for (d in deltas) {
-                        current -= d
-                        list.add(current)
-                    }
-                    list.reverse()
-                    list.takeLast(10)
+            val activeEloHistory = remember(selectedCadence, activeConfig.rating, games, safeProfile.username) {
+                val matched = games.filter {
+                    it.cadence.equals(selectedCadence, ignoreCase = true)
+                }.sortedBy { it.dateAdded }
+
+                val realRatings = matched.map { g ->
+                    val isWhite = g.whiteUser.equals(safeProfile.username, ignoreCase = true)
+                    if (isWhite) g.whiteElo else g.blackElo
+                }
+
+                if (realRatings.size >= 10) {
+                    realRatings.takeLast(10)
                 } else {
-                    val matched = games.filter {
-                        it.cadence.equals(selectedCadence, ignoreCase = true)
-                    }.sortedBy { it.dateAdded }
-
-                    val realRatings = matched.map { g ->
-                        val isWhite = g.whiteUser.equals(safeProfile.username, ignoreCase = true)
-                        if (isWhite) g.whiteElo else g.blackElo
+                    val missingAmount = 10 - realRatings.size
+                    // Smoothened dynamic seed generation back-stepping from current Elo
+                    val startRating = if (realRatings.isNotEmpty()) realRatings.first() else activeConfig.rating
+                    val paddedHistory = List(missingAmount) { idx ->
+                        val ratio = idx.toFloat() / missingAmount.coerceAtLeast(1)
+                        val trendOffset = (activeConfig.rating - startRating) * ratio
+                        val sineWave = kotlin.math.sin(idx.toFloat() * 1.3f) * 12f
+                        val offsetNoise = ((idx * 13 + activeConfig.rating) % 9) - 4
+                        (startRating - (missingAmount - idx) * 8 + trendOffset + sineWave + offsetNoise).toInt()
                     }
-
-                    if (realRatings.size >= 10) {
-                        realRatings.takeLast(10)
-                    } else {
-                        val missingAmount = 10 - realRatings.size
-                        // Smoothened dynamic seed generation back-stepping from current Elo
-                        val startRating = if (realRatings.isNotEmpty()) realRatings.first() else activeConfig.rating
-                        val paddedHistory = List(missingAmount) { idx ->
-                            val ratio = idx.toFloat() / missingAmount.coerceAtLeast(1)
-                            val trendOffset = (activeConfig.rating - startRating) * ratio
-                            val sineWave = kotlin.math.sin(idx.toFloat() * 1.3f) * 12f
-                            val offsetNoise = ((idx * 13 + activeConfig.rating) % 9) - 4
-                            (startRating - (missingAmount - idx) * 8 + trendOffset + sineWave + offsetNoise).toInt()
-                        }
-                        val combined = paddedHistory + realRatings
-                        combined.toMutableList().apply {
-                            this[this.lastIndex] = activeConfig.rating
-                        }
+                    val combined = paddedHistory + realRatings
+                    combined.toMutableList().apply {
+                        this[this.lastIndex] = activeConfig.rating
                     }
                 }
             }
@@ -165,51 +121,51 @@ fun DashboardScreen(
                     .padding(vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Row 1: Bullet and Blitz
+                // Row 1: Puzzles (Full screen primary card)
+                EloGridCard(
+                    config = cadences[0],
+                    isSelected = selectedCadence == cadences[0].key,
+                    onClick = { selectedCadence = cadences[0].key },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Row 2: Bullet and Blitz
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    EloGridCard(
-                        config = cadences[0],
-                        isSelected = selectedCadence == cadences[0].key,
-                        onClick = { selectedCadence = cadences[0].key },
-                        modifier = Modifier.weight(1f)
-                    )
                     EloGridCard(
                         config = cadences[1],
                         isSelected = selectedCadence == cadences[1].key,
                         onClick = { selectedCadence = cadences[1].key },
                         modifier = Modifier.weight(1f)
                     )
-                }
-
-                // Row 2: Rapid and Classical
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
                     EloGridCard(
                         config = cadences[2],
                         isSelected = selectedCadence == cadences[2].key,
                         onClick = { selectedCadence = cadences[2].key },
                         modifier = Modifier.weight(1f)
                     )
+                }
+
+                // Row 3: Rapid and Classical
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     EloGridCard(
                         config = cadences[3],
                         isSelected = selectedCadence == cadences[3].key,
                         onClick = { selectedCadence = cadences[3].key },
                         modifier = Modifier.weight(1f)
                     )
+                    EloGridCard(
+                        config = cadences[4],
+                        isSelected = selectedCadence == cadences[4].key,
+                        onClick = { selectedCadence = cadences[4].key },
+                        modifier = Modifier.weight(1f)
+                    )
                 }
-
-                // Row 3: Puzzles (Full screen primary card under the 4 main speed cadences)
-                EloGridCard(
-                    config = cadences[4],
-                    isSelected = selectedCadence == cadences[4].key,
-                    onClick = { selectedCadence = cadences[4].key },
-                    modifier = Modifier.fillMaxWidth()
-                )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -233,7 +189,7 @@ fun DashboardScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = if (selectedCadence == "puzzles") "Évolution du Classement" else "Progression d'Élo",
+                                    text = "Progression d'Élo",
                                     fontSize = 11.sp,
                                     color = Color.Gray,
                                     fontWeight = FontWeight.Medium
@@ -262,7 +218,7 @@ fun DashboardScreen(
                                 val scaleColor = if (diffRating >= 0) Color(0xFF4CA288) else Color(0xFFE53935)
 
                                 Text(
-                                    text = if (selectedCadence == "puzzles") "$scaleString Elo (10 périodes)" else "$scaleString pts (10 matches)",
+                                    text = "$scaleString pts (10 matches)",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = scaleColor
@@ -293,12 +249,12 @@ fun DashboardScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (selectedCadence == "puzzles") "Période d'activité 1" else "Il y a 10 parties",
+                                text = "Il y a 10 parties",
                                 fontSize = 10.sp,
                                 color = Color.Gray
                             )
                             Text(
-                                text = if (selectedCadence == "puzzles") "Période d'activité 10 (Actuelle)" else "Aujourd'hui",
+                                text = "Aujourd'hui",
                                 fontSize = 10.sp,
                                 color = activeConfig.themeColor,
                                 fontWeight = FontWeight.Bold
@@ -307,291 +263,166 @@ fun DashboardScreen(
                     }
                 }
 
-                if (selectedCadence == "puzzles") {
-                    Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                    // --- PUZZLE SUMMARY CARD ---
-                    val completedCount = practicePuzzlesList.filter { it.isCompleted }.size
-                    val failedCount = practicePuzzlesList.filter { it.userSolves == -1 }.size
-                    val totalTriedCount = completedCount + failedCount
-                    val successRate = if (totalTriedCount > 0) {
-                        (completedCount * 100f / totalTriedCount).toInt()
-                    } else {
-                        78
-                    }
-                    val totalSolved = 120 + completedCount
-
-                    val firstVal = activeEloHistory.firstOrNull() ?: safeProfile.puzzleElo
-                    val lastVal = activeEloHistory.lastOrNull() ?: safeProfile.puzzleElo
-                    val diffTot = lastVal - firstVal
-
-                    PuzzleSummaryCard(
-                        puzzleElo = safeProfile.puzzleElo,
-                        diffTot = diffTot,
-                        successRate = successRate,
-                        totalSolved = totalSolved
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // --- PUZZLE EVOLUTION PERIODS LIST ---
+                // modern segment winrate indicator
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF16181A)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("winrate_statistics_card")
+                ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 12.dp)
+                            .padding(16.dp)
                     ) {
                         Text(
-                            text = "Historique d'Évolution Puzzle",
+                            text = "Équilibre des Résultats",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            modifier = Modifier.padding(bottom = 8.dp)
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Répartition globale de vos parties jouées",
+                            fontSize = 11.sp,
+                            color = Color.Gray
                         )
 
-                        val totalPeriods = activeEloHistory.size
-                        for (i in totalPeriods - 1 downTo 0) {
-                            val currentRating = activeEloHistory[i]
-                            val prevRating = if (i > 0) activeEloHistory[i - 1] else null
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                            val delta = if (prevRating != null) currentRating - prevRating else null
-                            val deltaText = when {
-                                delta == null -> "Base"
-                                delta >= 0 -> "+$delta Elo"
-                                else -> "$delta Elo"
-                            }
-                            val deltaColor = when {
-                                delta == null -> Color.Gray
-                                delta >= 0 -> Color(0xFF4CA288)
-                                else -> Color(0xFFE53935)
-                            }
+                        val totalGames = safeProfile.winCount + safeProfile.lossCount + safeProfile.drawCount
+                        
+                        val winPct = if (totalGames > 0) (safeProfile.winCount * 100f / totalGames).toInt() else 45
+                        val lossPct = if (totalGames > 0) (safeProfile.lossCount * 100f / totalGames).toInt() else 50
+                        val drawPct = if (totalGames > 0) 100 - winPct - lossPct else 5
 
-                            val icon = when {
-                                delta == null -> Icons.Default.Info
-                                delta >= 0 -> Icons.Default.TrendingUp
-                                else -> Icons.Default.TrendingDown
-                            }
+                        val wins = if (totalGames > 0) safeProfile.winCount else 45
+                        val losses = if (totalGames > 0) safeProfile.lossCount else 50
+                        val draws = if (totalGames > 0) safeProfile.drawCount else 5
 
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF16181A)),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Row(
+                        // Segmented indicator bar with rounded corners on edges
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF0F1011))
+                        ) {
+                            if (winPct > 0) {
+                                Box(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .weight(winPct.toFloat())
+                                        .fillMaxHeight()
+                                        .background(Color(0xFF4CA288)),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = icon,
-                                            contentDescription = null,
-                                            tint = deltaColor,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
+                                    if (winPct >= 12) {
                                         Text(
-                                            text = "Période d'activité ${i + 1}",
+                                            text = "$winPct%",
                                             color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold
                                         )
                                     }
+                                }
+                            }
 
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
+                            if (drawPct > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(drawPct.toFloat())
+                                        .fillMaxHeight()
+                                        .background(Color(0xFF8A949C)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (drawPct >= 12) {
                                         Text(
-                                            text = "$currentRating Elo",
-                                            color = Color.LightGray,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
+                                            text = "$drawPct%",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold
                                         )
+                                    }
+                                }
+                            }
 
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(deltaColor.copy(alpha = 0.12f))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = deltaText,
-                                                color = deltaColor,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.ExtraBold
-                                            )
-                                        }
+                            if (lossPct > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(lossPct.toFloat())
+                                        .fillMaxHeight()
+                                        .background(Color(0xFFE53935)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (lossPct >= 12) {
+                                        Text(
+                                            text = "$lossPct%",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
                                     }
                                 }
                             }
                         }
-                    }
-                } else {
-                    Spacer(modifier = Modifier.height(6.dp))
 
-                    // modern segment winrate indicator
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF16181A)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("winrate_statistics_card")
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp)
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // High visual clarity legend block
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Équilibre des Résultats",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Répartition globale de vos parties jouées",
-                                fontSize = 11.sp,
-                                color = Color.Gray
-                            )
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            val totalGames = safeProfile.winCount + safeProfile.lossCount + safeProfile.drawCount
-
-                            val winPct = if (totalGames > 0) (safeProfile.winCount * 100f / totalGames).toInt() else 45
-                            val lossPct = if (totalGames > 0) (safeProfile.lossCount * 100f / totalGames).toInt() else 50
-                            val drawPct = if (totalGames > 0) 100 - winPct - lossPct else 5
-
-                            val wins = if (totalGames > 0) safeProfile.winCount else 45
-                            val losses = if (totalGames > 0) safeProfile.lossCount else 50
-                            val draws = if (totalGames > 0) safeProfile.drawCount else 5
-
-                            // Segmented indicator bar with rounded corners on edges
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(28.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF0F1011))
-                            ) {
-                                if (winPct > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(winPct.toFloat())
-                                            .fillMaxHeight()
-                                            .background(Color(0xFF4CA288)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (winPct >= 12) {
-                                            Text(
-                                                text = "$winPct%",
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.ExtraBold
-                                            )
-                                        }
-                                    }
-                                }
-
-                                if (drawPct > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(drawPct.toFloat())
-                                            .fillMaxHeight()
-                                            .background(Color(0xFF8A949C)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (drawPct >= 12) {
-                                            Text(
-                                                text = "$drawPct%",
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.ExtraBold
-                                            )
-                                        }
-                                    }
-                                }
-
-                                if (lossPct > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(lossPct.toFloat())
-                                            .fillMaxHeight()
-                                            .background(Color(0xFFE53935)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (lossPct >= 12) {
-                                            Text(
-                                                text = "$lossPct%",
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.ExtraBold
-                                            )
-                                        }
-                                    }
-                                }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF4CA288))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Victoires ($wins)",
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
 
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF8A949C))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Nulles ($draws)",
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
 
-                            // High visual clarity legend block
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF4CA288))
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Victoires ($wins)",
-                                        color = Color.LightGray,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF8A949C))
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Nulles ($draws)",
-                                        color = Color.LightGray,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFE53935))
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Défaites ($losses)",
-                                        color = Color.LightGray,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFE53935))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Défaites ($losses)",
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
                     }
@@ -601,82 +432,76 @@ fun DashboardScreen(
 
         // --- "Analyse ta partie" FEATURE CARD (Most Recent Game) ---
         item {
-            if (selectedCadence != "puzzles") {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp, bottom = 8.dp)
-                ) {
-                    Text(
-                        text = "Analyse ta partie",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp, bottom = 8.dp)
+            ) {
+                Text(
+                    text = "Analyse ta partie",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.height(10.dp))
 
-                    val latestGame = games.firstOrNull()
-                    if (latestGame != null) {
-                        GameRowCard(
-                            game = latestGame,
-                            username = safeProfile.username,
-                            onClick = {
-                                viewModel.loadGameForAnalysis(latestGame)
-                                onNavigateToAnalysis()
-                            }
-                        )
-                    } else {
-                        Text(
-                            text = "Aucune partie récente trouvée.",
-                            fontSize = 13.sp,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
+                val latestGame = games.firstOrNull()
+                if (latestGame != null) {
+                    GameRowCard(
+                        game = latestGame,
+                        username = safeProfile.username,
+                        onClick = {
+                            viewModel.loadGameForAnalysis(latestGame)
+                            onNavigateToAnalysis()
+                        }
+                    )
+                } else {
+                    Text(
+                        text = "Aucune partie récente trouvée.",
+                        fontSize = 13.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
                 }
             }
         }
 
         // --- "Tout" SUBHEADER ---
         item {
-            if (selectedCadence != "puzzles") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 20.dp, bottom = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Tout",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White
-                    )
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = "Filtres",
-                        tint = Color.Gray,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 20.dp, bottom = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Tout",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White
+                )
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = "Filtres",
+                    tint = Color.Gray,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
 
         // --- REMAINING GAMES CHRONOLOGICAL LIST ---
         val remainingGames = if (games.isNotEmpty()) games.drop(0) else emptyList()
         itemsIndexed(remainingGames) { index, game ->
-            if (selectedCadence != "puzzles") {
-                GameRowCard(
-                    game = game,
-                    username = safeProfile.username,
-                    onClick = {
-                        viewModel.loadGameForAnalysis(game)
-                        onNavigateToAnalysis()
-                    }
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-            }
+            GameRowCard(
+                game = game,
+                username = safeProfile.username,
+                onClick = {
+                    viewModel.loadGameForAnalysis(game)
+                    onNavigateToAnalysis()
+                }
+            )
+            Spacer(modifier = Modifier.height(10.dp))
         }
 
         item {
@@ -1343,85 +1168,3 @@ fun PureLichessIconClassical(color: Color, modifier: Modifier = Modifier.size(24
         )
     }
 }
-
-@Composable
-fun PuzzleSummaryCard(
-    puzzleElo: Int,
-    diffTot: Int,
-    successRate: Int,
-    totalSolved: Int
-) {
-    val diffString = if (diffTot >= 0) "+$diffTot Elo" else "$diffTot Elo"
-    val diffColor = if (diffTot >= 0) Color(0xFF4CA288) else Color(0xFFE53935)
-
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF16181A)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("puzzle_summary_card")
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Text(
-                text = "Résumé d'Activité Puzzle",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "Statistiques de performance globales & période actuelle",
-                fontSize = 11.sp,
-                color = Color.Gray
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Col 1: Elo & Delta
-                Card(
-                    modifier = Modifier.weight(1f),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1011)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.Start
-                    ) {
-                        Text("Classement Actuel", color = Color.Gray, fontSize = 10.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("$puzzleElo Elo", color = Color(0xFFFFD54F), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(text = diffString, color = diffColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-
-                // Col 2: Résolutions
-                Card(
-                    modifier = Modifier.weight(1f),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1011)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.Start
-                    ) {
-                        Text("Résolus & Taux", color = Color.Gray, fontSize = 10.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("$totalSolved Puzzles", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(text = "$successRate% Réussite", color = Color(0xFF4CA288), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-        }
-    }
-}
-

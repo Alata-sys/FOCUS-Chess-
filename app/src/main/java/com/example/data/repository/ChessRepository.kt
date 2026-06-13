@@ -36,7 +36,6 @@ data class CloudEvalData(
 @JsonClass(generateAdapter = true)
 data class NdjsonPlayerDetail(
     val rating: Int? = null,
-    val ratingDiff: Int? = null,
     val user: NdjsonUserDetail? = null
 )
 
@@ -172,10 +171,6 @@ class ChessRepository(
                                 else -> "draw"
                             }
                             
-                            val whiteRatingDiff = game.players?.white?.ratingDiff
-                            val blackRatingDiff = game.players?.black?.ratingDiff
-                            val playerRatingDiff = if (isWhiteOpp) (whiteRatingDiff ?: 0) else (blackRatingDiff ?: 0)
-                            
                             val entity = ChessGameEntity(
                                 id = game.id,
                                 whiteUser = whiteUser,
@@ -186,9 +181,7 @@ class ChessRepository(
                                 cadence = game.speed ?: "blitz",
                                 moves = game.moves ?: "",
                                 initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-                                ratingDiff = playerRatingDiff,
-                                whiteRatingDiff = whiteRatingDiff,
-                                blackRatingDiff = blackRatingDiff,
+                                ratingDiff = if (isWhiteOpp) (game.players?.white?.rating ?: 1500) else (game.players?.black?.rating ?: 1500),
                                 dateAdded = game.createdAt ?: System.currentTimeMillis()
                             )
                             gamesList.add(entity)

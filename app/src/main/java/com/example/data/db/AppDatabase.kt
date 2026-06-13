@@ -14,7 +14,7 @@ import com.example.data.model.PuzzleEntity
         ChessGameEntity::class,
         PuzzleEntity::class
     ],
-    version = 4,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
