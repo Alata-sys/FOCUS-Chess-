@@ -23,6 +23,9 @@ class StockfishJsEngine(private val context: Context) {
     private val _bestMove = MutableStateFlow("")
     val bestMove: StateFlow<String> = _bestMove
 
+    private val _candidateLines = MutableStateFlow<List<String>>(emptyList())
+    val candidateLines: StateFlow<List<String>> = _candidateLines
+
     private val handler = Handler(Looper.getMainLooper())
 
     init {
@@ -52,8 +55,13 @@ class StockfishJsEngine(private val context: Context) {
     }
 
     fun evaluate(fen: String) {
+        val manager = EngineManager.getInstance(context)
+        evaluate(fen, manager.analysisDepth.value, manager.multiPv.value, manager.cpuLimit.value)
+    }
+
+    fun evaluate(fen: String, depth: Int, multiPv: Int, threads: Int) {
         handler.post {
-            webView?.evaluateJavascript("javascript:evaluatePosition('${fen.replace("'", "\\'")}');", null)
+            webView?.evaluateJavascript("javascript:evaluatePosition('${fen.replace("'", "\\'")}', $depth, $multiPv, $threads);", null)
         }
     }
 
@@ -114,6 +122,12 @@ class StockfishJsEngine(private val context: Context) {
                                     }
                                 }
                                 
+                                if (line.includes("multipv ")) {
+                                    if (window.AndroidInterface && window.AndroidInterface.onCandidateLine) {
+                                        window.AndroidInterface.onCandidateLine(line);
+                                    }
+                                }
+
                                 if (line.startsWith("bestmove")) {
                                     var parts = line.split(" ");
                                     if (parts.length > 1) {
@@ -138,17 +152,25 @@ class StockfishJsEngine(private val context: Context) {
                         }
                     }
 
-                    function evaluatePosition(fen) {
+                    function evaluatePosition(fen, depth, multiPv, threads) {
                         try {
                             if (!stockfish) {
                                 initStockfish();
                             }
-                            currentFen = fen;
+                            if (window.AndroidInterface && window.AndroidInterface.onClearCandidateLines) {
+                                window.AndroidInterface.onClearCandidateLines();
+                            }
+                            var targetDepth = depth || 15;
+                            var targetPV = multiPv || 1;
+                            var targetThreads = threads || 4;
+
                             stockfish.postMessage("stop");
+                            stockfish.postMessage("setoption name MultiPV value " + targetPV);
+                            stockfish.postMessage("setoption name Threads value " + targetThreads);
+
+                            currentFen = fen;
                             stockfish.postMessage("position fen " + fen);
-                            // Increase depth for better analysis and ensure it runs continuously.
-                            // Real-time feels: stockfish runs until evaluation is decent
-                            stockfish.postMessage("go depth 15");
+                            stockfish.postMessage("go depth " + targetDepth);
                         } catch(err) {
                             if (window.AndroidInterface) {
                                 window.AndroidInterface.onStatus("ERROR: " + err.message);
@@ -180,6 +202,57 @@ class StockfishJsEngine(private val context: Context) {
         fun onBestMove(bestMoveStr: String) {
             Log.d("StockfishJsEngine", "Best move: $bestMoveStr")
             _bestMove.value = bestMoveStr
+        }
+
+        @JavascriptInterface
+        fun onClearCandidateLines() {
+            _candidateLines.value = emptyList()
+        }
+
+        @JavascriptInterface
+        fun onCandidateLine(line: String) {
+            try {
+                val parts = line.split(" ")
+                val mpvIdx = parts.indexOf("multipv")
+                if (mpvIdx != -1 && mpvIdx + 1 < parts.size) {
+                    val pvNum = parts[mpvIdx + 1].toIntOrNull() ?: 1
+                    
+                    var scoreStr = ""
+                    val cpIdx = parts.indexOf("cp")
+                    if (cpIdx != -1 && cpIdx + 1 < parts.size) {
+                        val cpValue = (parts[cpIdx + 1].toIntOrNull() ?: 0) / 100.0
+                        scoreStr = if (cpValue >= 0) "+$cpValue" else "$cpValue"
+                    } else {
+                        val mateIdx = parts.indexOf("mate")
+                        if (mateIdx != -1 && mateIdx + 1 < parts.size) {
+                            val mateVal = parts[mateIdx + 1].toIntOrNull() ?: 0
+                            scoreStr = "M$mateVal"
+                        }
+                    }
+
+                    val pvIdx = parts.indexOf("pv")
+                    val moves = if (pvIdx != -1 && pvIdx + 1 < parts.size) {
+                        parts.subList(pvIdx + 1, parts.size).take(6).joinToString(" ")
+                    } else ""
+
+                    if (moves.isNotEmpty()) {
+                        val formatted = "Var $pvNum ($scoreStr): $moves"
+                        val currentList = _candidateLines.value.toMutableList()
+                        val existingIndex = currentList.indexOfFirst { it.startsWith("Var $pvNum") }
+                        if (existingIndex != -1) {
+                            currentList[existingIndex] = formatted
+                        } else {
+                            currentList.add(formatted)
+                        }
+                        _candidateLines.value = currentList.sortedBy { 
+                            val num = it.substringAfter("Var ").substringBefore(" ").toIntOrNull() ?: 0
+                            num
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("StockfishJsEngine", "Candidate PV Parsing error", e)
+            }
         }
     }
 }

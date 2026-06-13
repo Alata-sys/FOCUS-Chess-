@@ -212,84 +212,249 @@ fun LoginScreen(
                                 color = Color.White
                             )
 
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
 
-                            Text(
-                                text = "Entrez votre Pseudo de joueur pour charger instantanément vos parties et vos statistiques.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.LightGray
-                            )
+                            // Interactive Tab Switcher
+                            var isOAuthTab by remember { mutableStateOf(true) }
+                            val context = androidx.compose.ui.platform.LocalContext.current
 
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            OutlinedTextField(
-                                value = viewModel.userLoginInput,
-                                onValueChange = { viewModel.userLoginInput = it },
-                                label = { Text("Pseudo du joueur", color = Color.Gray) },
-                                placeholder = { Text("Exemple: LanceurTactique", color = Color.DarkGray) },
-                                singleLine = true,
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Person,
-                                        contentDescription = "User Icon",
-                                        tint = Color(0xFF4B7399)
-                                    )
-                                },
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color(0xFF4B7399),
-                                    unfocusedBorderColor = Color.DarkGray
-                                ),
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("username_field")
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            if (isAnalyzing) {
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF0F1011))
+                                    .padding(4.dp)
+                            ) {
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(8.dp),
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isOAuthTab) Color(0xFF4B7399) else Color.Transparent)
+                                        .clickable { isOAuthTab = true }
+                                        .padding(vertical = 10.dp)
+                                        .testTag("tab_oauth"),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    CircularProgressIndicator(
-                                        color = Color(0xFF4B7399)
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = null,
+                                            tint = if (isOAuthTab) Color.White else Color.Gray,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "OAuth2 Sécurisé",
+                                            color = if (isOAuthTab) Color.White else Color.Gray,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
-                            } else {
-                                Button(
-                                    onClick = {
-                                        val input = viewModel.userLoginInput.trim()
-                                        if (input.isNotEmpty()) {
-                                            viewModel.loginWithLichess(input) { succeed ->
-                                                if (succeed) {
-                                                    currentPhase = SplashPhase.FADE_OUT
-                                                } else {
-                                                    errorMsg = "Joueur introuvable ou erreur réseau. Essayer un autre pseudo."
-                                                }
-                                            }
-                                        } else {
-                                            errorMsg = "Veuillez entrer un pseudo avant de continuer."
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF4B7399)
-                                    ),
-                                    shape = RoundedCornerShape(12.dp),
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (!isOAuthTab) Color(0xFF4B7399) else Color.Transparent)
+                                        .clickable { isOAuthTab = false }
+                                        .padding(vertical = 10.dp)
+                                        .testTag("tab_username"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Person,
+                                            contentDescription = null,
+                                            tint = if (!isOAuthTab) Color.White else Color.Gray,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Pseudo Public",
+                                            color = if (!isOAuthTab) Color.White else Color.Gray,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            if (isOAuthTab) {
+                                // --- OAUTH FLOW PANEL ---
+                                Text(
+                                    text = "Connectez-vous en toute sécurité via Lichess. Cette méthode protège vos données et garantit un accès instantané à votre historique de parties complet.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.LightGray
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                var showAdvancedOAuth by remember { mutableStateOf(false) }
+
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(50.dp)
-                                        .testTag("import_button")
+                                        .clickable { showAdvancedOAuth = !showAdvancedOAuth }
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = "C'est parti ! 🚀",
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.ExtraBold
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = Color.Gray,
+                                        modifier = Modifier.size(18.dp)
                                     )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Reglages Client ID (Optionnel/UCI)",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+
+                                if (showAdvancedOAuth) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    OutlinedTextField(
+                                        value = viewModel.customClientId,
+                                        onValueChange = { viewModel.customClientId = it },
+                                        label = { Text("Lichess Client ID", color = Color.Gray) },
+                                        placeholder = { Text("focus-plus-chess-coach", color = Color.DarkGray) },
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            focusedBorderColor = Color(0xFF4B7399),
+                                            unfocusedBorderColor = Color.DarkGray
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("oauth_client_id_field")
+                                    )
+                                    Text(
+                                        text = "Par défaut, l'application utilise 'focus-plus-chess-coach'. Pour enregistrer votre propre ID applicatif UCI Lichess, configurez en redirection : focusplus://oauth",
+                                        fontSize = 10.sp,
+                                        color = Color.Gray,
+                                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                if (isAnalyzing) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(color = Color(0xFF4B7399))
+                                    }
+                                } else {
+                                    Button(
+                                        onClick = {
+                                            val configuredClientId = viewModel.customClientId.ifBlank { "focus-plus-chess-coach" }
+                                            viewModel.startLichessOAuth(context, configuredClientId)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF4B7399)
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(50.dp)
+                                            .testTag("oauth_login_button")
+                                    ) {
+                                        Text(
+                                            text = "Se connecter avec Lichess ♟️",
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+                                }
+                            } else {
+                                // --- LEGACY PUBLIC USERNAME FLOW PANEL ---
+                                Text(
+                                    text = "Entrez votre Pseudo de joueur pour charger publiquement vos parties sans connexion par mot de passe.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.LightGray
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                OutlinedTextField(
+                                    value = viewModel.userLoginInput,
+                                    onValueChange = { viewModel.userLoginInput = it },
+                                    label = { Text("Pseudo du joueur", color = Color.Gray) },
+                                    placeholder = { Text("Exemple: LanceurTactique", color = Color.DarkGray) },
+                                    singleLine = true,
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Person,
+                                            contentDescription = "User Icon",
+                                            tint = Color(0xFF4B7399)
+                                        )
+                                    },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = Color(0xFF4B7399),
+                                        unfocusedBorderColor = Color.DarkGray
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("username_field")
+                                )
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
+                                if (isAnalyzing) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = Color(0xFF4B7399)
+                                        )
+                                    }
+                                } else {
+                                    Button(
+                                        onClick = {
+                                            val input = viewModel.userLoginInput.trim()
+                                            if (input.isNotEmpty()) {
+                                                viewModel.loginWithLichess(input) { succeed ->
+                                                    if (succeed) {
+                                                        currentPhase = SplashPhase.FADE_OUT
+                                                    } else {
+                                                        errorMsg = "Joueur introuvable ou erreur réseau. Essayer un autre pseudo."
+                                                    }
+                                                }
+                                            } else {
+                                                errorMsg = "Veuillez entrer un pseudo avant de continuer."
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF4B7399)
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(50.dp)
+                                            .testTag("import_button")
+                                    ) {
+                                        Text(
+                                            text = "C'est parti ! 🚀",
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
                                 }
                             }
 

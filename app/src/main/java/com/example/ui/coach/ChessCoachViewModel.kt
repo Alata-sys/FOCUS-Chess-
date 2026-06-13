@@ -67,10 +67,12 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     var activeMoveIndex by mutableStateOf(-1)
 
     // --- Analytical Feedback States ---
+    val engineManager = com.example.engine.EngineManager.getInstance(application)
     val stockfishJsEngine = StockfishJsEngine(application)
-    var isLocalEngineMode by mutableStateOf(true) // Default to local Web Worker engine since user requested it!
+    var isLocalEngineMode by mutableStateOf(engineManager.activeEngineType.value == com.example.engine.AnalysisEngineType.STOCKFISH_LOCAL)
     fun toggleEngineMode() {
-        isLocalEngineMode = !isLocalEngineMode
+        val nextType = if (isLocalEngineMode) com.example.engine.AnalysisEngineType.LICHESS else com.example.engine.AnalysisEngineType.STOCKFISH_LOCAL
+        engineManager.setActiveEngine(nextType)
     }
     var localEngineStatus by mutableStateOf("Démarrage du Thread Stockfish.js...")
 
@@ -204,6 +206,12 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         viewModelScope.launch {
+            engineManager.activeEngineType.collect { type ->
+                isLocalEngineMode = (type == com.example.engine.AnalysisEngineType.STOCKFISH_LOCAL)
+            }
+        }
+
+        viewModelScope.launch {
             stockfishJsEngine.evaluation.collect { eval ->
                 if (isLocalEngineMode) {
                     stockfishEval = eval
@@ -270,7 +278,6 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
             .appendQueryParameter("redirect_uri", "focusplus://oauth")
             .appendQueryParameter("code_challenge_method", "S256")
             .appendQueryParameter("code_challenge", challenge)
-            .appendQueryParameter("scope", "preference:read")
             .build()
             
         Log.d("ChessCoachViewModel", "Launching Lichess OAuth authorize URL: $authorizationUrl")

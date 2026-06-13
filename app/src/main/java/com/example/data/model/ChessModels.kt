@@ -32,6 +32,8 @@ data class ChessGameEntity(
     val initialFen: String = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     val analysisExplain: String? = null,
     val ratingDiff: Int = 0,
+    val whiteRatingDiff: Int? = null,
+    val blackRatingDiff: Int? = null,
     val dateAdded: Long = System.currentTimeMillis()
 )
 
