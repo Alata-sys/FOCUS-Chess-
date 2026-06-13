@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,12 +73,44 @@ fun DashboardScreen(
         item {
             var showSettingsDialog by remember { mutableStateOf(false) }
 
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 16.dp, bottom = 4.dp),
-                contentAlignment = Alignment.CenterEnd
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.testTag("dashboard_home_header")
+                ) {
+                    Image(
+                        painter = painterResource(id = com.example.R.drawable.focus_plus_logo),
+                        contentDescription = "FOCUS+ Logo",
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.2.dp, Color(0xFF4B7399).copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                    Column {
+                        Text(
+                            text = "FOCUS+",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.5.sp
+                        )
+                        Text(
+                            text = "Bonjour, ${safeProfile.username} !",
+                            color = Color.Gray,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
                 IconButton(
                     onClick = { showSettingsDialog = true },
                     modifier = Modifier.testTag("dashboard_settings_button")

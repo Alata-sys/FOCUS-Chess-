@@ -32,6 +32,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +49,8 @@ import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.LoginScreen
 import com.example.ui.screens.TrainingScreen
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.screens.GlobalSplashScreen
+import kotlinx.coroutines.delay
 
 enum class Screen {
     DASHBOARD,
@@ -89,121 +92,141 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         setContent {
             MyApplicationTheme {
-                val profile by viewModel.activeProfile.collectAsState()
-                
-                // Keep tracks of active screen navigation
-                var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
+                var showGlobalSplash by remember { mutableStateOf(true) }
 
-                if (profile == null) {
-                    // Force login if not authenticated
-                    LoginScreen(
-                        viewModel = viewModel,
-                        onLoginSuccess = {
-                            currentScreen = Screen.DASHBOARD
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    // Authenticated Application Shell
-                    Scaffold(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFF0F1011))
-                            .windowInsetsPadding(WindowInsets.statusBars),
-                        bottomBar = {
-                            NavigationBar(
-                                containerColor = Color(0xFF16181A),
-                                tonalElevation = 8.dp,
+                LaunchedEffect(Unit) {
+                    delay(3000)
+                    showGlobalSplash = false
+                }
+
+                AnimatedContent(
+                    targetState = showGlobalSplash,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(500)) togetherWith fadeOut(animationSpec = tween(600))
+                    },
+                    label = "GlobalSplashTransition"
+                ) { isSplash ->
+                    if (isSplash) {
+                        GlobalSplashScreen(modifier = Modifier.fillMaxSize())
+                    } else {
+                        val profile by viewModel.activeProfile.collectAsState()
+                        
+                        // Keep tracks of active screen navigation
+                        var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
+
+                        if (profile == null) {
+                            // Force login if not authenticated
+                            LoginScreen(
+                                viewModel = viewModel,
+                                onLoginSuccess = {
+                                    currentScreen = Screen.DASHBOARD
+                                },
+                                skipIntro = true,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            // Authenticated Application Shell
+                            Scaffold(
                                 modifier = Modifier
-                                    .windowInsetsPadding(WindowInsets.navigationBars)
-                                    .testTag("app_navigation_bar")
-                            ) {
-                                NavigationBarItem(
-                                    selected = currentScreen == Screen.DASHBOARD,
-                                    onClick = { currentScreen = Screen.DASHBOARD },
-                                    label = { Text("Stats", fontSize = 11.sp) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Leaderboard,
-                                            contentDescription = "Stats"
+                                    .fillMaxSize()
+                                    .background(Color(0xFF0F1011))
+                                    .windowInsetsPadding(WindowInsets.statusBars),
+                                bottomBar = {
+                                    NavigationBar(
+                                        containerColor = Color(0xFF16181A),
+                                        tonalElevation = 8.dp,
+                                        modifier = Modifier
+                                            .windowInsetsPadding(WindowInsets.navigationBars)
+                                            .testTag("app_navigation_bar")
+                                    ) {
+                                        NavigationBarItem(
+                                            selected = currentScreen == Screen.DASHBOARD,
+                                            onClick = { currentScreen = Screen.DASHBOARD },
+                                            label = { Text("Stats", fontSize = 11.sp) },
+                                            icon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Leaderboard,
+                                                    contentDescription = "Stats"
+                                                )
+                                            },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = Color.White,
+                                                selectedTextColor = Color.White,
+                                                unselectedIconColor = Color.Gray,
+                                                unselectedTextColor = Color.Gray,
+                                                indicatorColor = Color(0xFF4B7399)
+                                            ),
+                                            modifier = Modifier.testTag("nav_item_dashboard")
                                         )
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = Color.White,
-                                        selectedTextColor = Color.White,
-                                        unselectedIconColor = Color.Gray,
-                                        unselectedTextColor = Color.Gray,
-                                        indicatorColor = Color(0xFF4B7399)
-                                    ),
-                                    modifier = Modifier.testTag("nav_item_dashboard")
-                                )
 
-                                NavigationBarItem(
-                                    selected = currentScreen == Screen.ANALYSIS,
-                                    onClick = { currentScreen = Screen.ANALYSIS },
-                                    label = { Text("Coach IA", fontSize = 11.sp) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Timeline,
-                                            contentDescription = "Analyse"
+                                        NavigationBarItem(
+                                            selected = currentScreen == Screen.ANALYSIS,
+                                            onClick = { currentScreen = Screen.ANALYSIS },
+                                            label = { Text("Coach IA", fontSize = 11.sp) },
+                                            icon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Timeline,
+                                                    contentDescription = "Analyse"
+                                                )
+                                            },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = Color.White,
+                                                selectedTextColor = Color.White,
+                                                unselectedIconColor = Color.Gray,
+                                                unselectedTextColor = Color.Gray,
+                                                indicatorColor = Color(0xFF4B7399)
+                                            ),
+                                            modifier = Modifier.testTag("nav_item_analysis")
                                         )
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = Color.White,
-                                        selectedTextColor = Color.White,
-                                        unselectedIconColor = Color.Gray,
-                                        unselectedTextColor = Color.Gray,
-                                        indicatorColor = Color(0xFF4B7399)
-                                    ),
-                                    modifier = Modifier.testTag("nav_item_analysis")
-                                )
 
-                                NavigationBarItem(
-                                    selected = currentScreen == Screen.TRAINING,
-                                    onClick = { currentScreen = Screen.TRAINING },
-                                    label = { Text("Puzzles", fontSize = 11.sp) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Extension,
-                                            contentDescription = "Entraînement"
+                                        NavigationBarItem(
+                                            selected = currentScreen == Screen.TRAINING,
+                                            onClick = { currentScreen = Screen.TRAINING },
+                                            label = { Text("Puzzles", fontSize = 11.sp) },
+                                            icon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Extension,
+                                                    contentDescription = "Entraînement"
+                                                )
+                                            },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = Color.White,
+                                                selectedTextColor = Color.White,
+                                                unselectedIconColor = Color.Gray,
+                                                unselectedTextColor = Color.Gray,
+                                                indicatorColor = Color(0xFF4B7399)
+                                            ),
+                                            modifier = Modifier.testTag("nav_item_training")
                                         )
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = Color.White,
-                                        selectedTextColor = Color.White,
-                                        unselectedIconColor = Color.Gray,
-                                        unselectedTextColor = Color.Gray,
-                                        indicatorColor = Color(0xFF4B7399)
-                                    ),
-                                    modifier = Modifier.testTag("nav_item_training")
-                                )
-                            }
-                        }
-                    ) { innerPadding ->
-                        // Smooth slide / fade Content screen swaps
-                        AnimatedContent(
-                            targetState = currentScreen,
-                            transitionSpec = {
-                                fadeIn(animationSpec = tween(250)) togetherWith fadeOut(animationSpec = tween(200))
-                            },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(innerPadding)
-                                .background(Color(0xFF0F1011))
-                        ) { targetScreen ->
-                            when (targetScreen) {
-                                Screen.DASHBOARD -> DashboardScreen(
-                                    viewModel = viewModel,
-                                    onNavigateToAnalysis = {
-                                        currentScreen = Screen.ANALYSIS
                                     }
-                                )
-                                Screen.ANALYSIS -> AnalysisScreen(
-                                    viewModel = viewModel
-                                )
-                                Screen.TRAINING -> TrainingScreen(
-                                    viewModel = viewModel
-                                )
+                                }
+                            ) { innerPadding ->
+                                // Smooth slide / fade Content screen swaps
+                                AnimatedContent(
+                                    targetState = currentScreen,
+                                    transitionSpec = {
+                                        fadeIn(animationSpec = tween(250)) togetherWith fadeOut(animationSpec = tween(200))
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(innerPadding)
+                                        .background(Color(0xFF0F1011))
+                                ) { targetScreen ->
+                                    when (targetScreen) {
+                                        Screen.DASHBOARD -> DashboardScreen(
+                                            viewModel = viewModel,
+                                            onNavigateToAnalysis = {
+                                                currentScreen = Screen.ANALYSIS
+                                            }
+                                        )
+                                        Screen.ANALYSIS -> AnalysisScreen(
+                                            viewModel = viewModel
+                                        )
+                                        Screen.TRAINING -> TrainingScreen(
+                                            viewModel = viewModel
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

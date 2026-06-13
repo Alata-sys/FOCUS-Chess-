@@ -32,6 +32,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.coach.ChessCoachViewModel
+import com.example.R
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
@@ -46,37 +50,44 @@ enum class SplashPhase {
 fun LoginScreen(
     viewModel: ChessCoachViewModel,
     onLoginSuccess: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    skipIntro: Boolean = false
 ) {
     var errorMsg by remember { mutableStateOf<String?>(null) }
     val isAnalyzing = viewModel.isAnalyzing
     val scrollState = rememberScrollState()
 
     // Screen phases & flow
-    var currentPhase by remember { mutableStateOf(SplashPhase.INTRO) }
+    var currentPhase by remember { mutableStateOf(if (skipIntro) SplashPhase.FORM else SplashPhase.INTRO) }
 
     // Fade logo & scale anims during Phase 1
-    val logoScale = remember { Animatable(0.7f) }
-    val logoAlpha = remember { Animatable(0f) }
+    val logoScale = remember { Animatable(if (skipIntro) 1.0f else 0.7f) }
+    val logoAlpha = remember { Animatable(if (skipIntro) 1.0f else 0f) }
 
     // Start introductory animation trigger
     LaunchedEffect(Unit) {
-        val scaleJob = this.async {
-            logoScale.animateTo(
-                targetValue = 1.0f,
-                animationSpec = tween(1200, easing = FastOutSlowInEasing)
-            )
+        if (skipIntro) {
+            logoScale.snapTo(1.0f)
+            logoAlpha.snapTo(1.0f)
+            currentPhase = SplashPhase.FORM
+        } else {
+            val scaleJob = this.async {
+                logoScale.animateTo(
+                    targetValue = 1.0f,
+                    animationSpec = tween(1200, easing = FastOutSlowInEasing)
+                )
+            }
+            val alphaJob = this.async {
+                logoAlpha.animateTo(
+                    targetValue = 1.0f,
+                    animationSpec = tween(1000)
+                )
+            }
+            scaleJob.await()
+            alphaJob.await()
+            delay(1200) // Delay to let the branding settle beautifully
+            currentPhase = SplashPhase.FORM
         }
-        val alphaJob = this.async {
-            logoAlpha.animateTo(
-                targetValue = 1.0f,
-                animationSpec = tween(1000)
-            )
-        }
-        scaleJob.await()
-        alphaJob.await()
-        delay(1200) // Delay to let the branding settle beautifully
-        currentPhase = SplashPhase.FORM
     }
 
     // Offset logo vertically upwards to clear space for form
@@ -128,25 +139,17 @@ fun LoginScreen(
                     Box(
                         modifier = Modifier
                             .size(110.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.radialGradient(
-                                    colors = listOf(
-                                        Color(0xFF4B7399),
-                                        Color(0xFF233649)
-                                    )
-                                )
-                            )
-                            .shadow(12.dp, CircleShape)
-                            .border(2.dp, Color(0xFF5E8CBA), CircleShape),
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color.Black)
+                            .shadow(12.dp, RoundedCornerShape(24.dp))
+                            .border(2.dp, Color(0xFF4B7399).copy(alpha = 0.6f), RoundedCornerShape(24.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "⚡",
-                            fontSize = 62.sp,
-                            color = Color(0xFFFFD700),
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.scale(if (currentPhase == SplashPhase.INTRO) logoAlpha.value else 1.0f)
+                        Image(
+                            painter = painterResource(id = R.drawable.focus_plus_logo),
+                            contentDescription = "FOCUS+ Logo",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
                         )
                     }
 
