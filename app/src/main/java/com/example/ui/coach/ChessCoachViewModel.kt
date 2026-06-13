@@ -81,6 +81,10 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     var isGeneratingSummary by mutableStateOf(false)
     var gameSummaryReport by mutableStateOf<String?>(null)
     
+    var isGeneratingStructuredCoaching by mutableStateOf(false)
+    var parsedGameCoaching by mutableStateOf<com.example.data.model.ParsedCoachingFeedback?>(null)
+    var structuredCoachingError by mutableStateOf<String?>(null)
+    
     // Dashboard Insights
     var isFetchingInsights by mutableStateOf(false)
     var dashboardInsights by mutableStateOf<String?>(null)
@@ -387,6 +391,8 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         moveEvaluationsList = List(movesList.size) { "Non analysé" }
         activeMoveIndex = -1
         gameSummaryReport = null
+        parsedGameCoaching = null
+        structuredCoachingError = null
         
         stockfishEval = if (game.winner == "white") "+Mat" else if (game.winner == "black") "-Mat" else "Égalité"
         
@@ -894,6 +900,27 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun generateStructuredGameCoaching(apiKey: String) {
+        if (moveHistoryList.isEmpty()) {
+            coachAdvice = "Veuillez d'abord jouer ou charger une partie pour générer un bilan !"
+            return
+        }
+        isGeneratingStructuredCoaching = true
+        structuredCoachingError = null
+        parsedGameCoaching = null
+        viewModelScope.launch {
+            val pgn = getPgnString()
+            val evalHistory = getEvaluationsHistoryString()
+            val result = repository.getGeminiStructuredCoaching(pgn, evalHistory, apiKey)
+            isGeneratingStructuredCoaching = false
+            if (result.isSuccess) {
+                parsedGameCoaching = result.getOrNull()
+            } else {
+                structuredCoachingError = result.exceptionOrNull()?.message ?: "Impossible de générer le bilan structuré de la partie."
+            }
+        }
+    }
+
     fun resetBoard() {
         selectedPuzzle = null
         isDailyPuzzleCompleted = false
@@ -909,6 +936,8 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         activeMoveIndex = -1
         stockfishEval = "0.0"
         gameSummaryReport = null
+        parsedGameCoaching = null
+        structuredCoachingError = null
         stopSpeaking()
     }
 

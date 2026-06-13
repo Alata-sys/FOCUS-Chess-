@@ -55,3 +55,17 @@ data class MoveAnalysis(
     val evaluation: Double // absolute from white's perspective
 )
 
+data class KeyMomentFeedback(
+    val moveNumber: Int,
+    val moveNotation: String,
+    val type: String, // EXCELLENT, MISTAKE, BLUNDER
+    val description: String
+)
+
+data class ParsedCoachingFeedback(
+    val globalVerdict: String,
+    val keyMoments: List<KeyMomentFeedback>,
+    val professionalTips: List<String>
+)
+
+

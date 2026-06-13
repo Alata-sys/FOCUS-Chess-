@@ -450,6 +450,110 @@ class ChessRepository(
     }
 
     /**
+     * Generates a structural coaching feedback from Gemini based on the raw PGN and Stockfish evaluations list.
+     */
+    suspend fun getGeminiStructuredCoaching(
+        pgn: String,
+        evalHistory: String,
+        apiKey: String
+    ): Result<com.example.data.model.ParsedCoachingFeedback> = withContext(Dispatchers.IO) {
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            return@withContext Result.failure(Exception("Clé API Gemini d'AI Studio non configurée"))
+        }
+
+        val prompt = """
+            Analyse cette partie d'échecs complète en français comme un entraîneur d'élite (Grand Maître d'échecs).
+            En utilisant la notation PGN globale et l'historique d'évaluation de la partie :
+            
+            PGN :
+            $pgn
+            
+            Historique d'évaluation Stockfish :
+            $evalHistory
+            
+            Génère une réponse sous forme d'un UNIQUE objet JSON contenant l'analyse stratégique complète de la partie, structurée EXACTEMENT comme suit :
+            {
+              "globalVerdict": "(Rédige ici un paragraphe global et chaleureux de 3-4 phrases en français résumant la partie, la dynamique générale, les tournants stratégiques.)",
+              "keyMoments": [
+                {
+                  "moveNumber": 12,
+                  "moveNotation": "Nf3",
+                  "type": "EXCELLENT",
+                  "description": "Explication tactique simple, humaine et chaleureuse de 1 ou 2 phrases en français."
+                }
+              ],
+              "professionalTips": [
+                "Conseil personnalisé 1 en français pour que le joueur s'améliore, court et direct.",
+                "Conseil personnalisé 2 en français.",
+                "Conseil personnalisé 3 en français."
+              ]
+            }
+
+            Le champ "type" dans "keyMoments" doit être obligatoirement une des trois valeurs textuelles suivantes : "EXCELLENT", "MISTAKE", "BLUNDER".
+            Renvoie DIRECTEMENT le JSON sans bloc markdown (pas de ```json), sans introduction ni conclusion.
+        """.trimIndent()
+
+        val request = GenerateContentRequest(
+            contents = listOf(Content(parts = listOf(Part(text = prompt)))),
+            generationConfig = GenerationConfig(temperature = 0.5f),
+            systemInstruction = Content(parts = listOf(Part(text = "Tu es FOCUS+, un grand entraîneur d'échecs qui s'exprime uniquement par un format JSON d'analyse de partie d'échecs.")))
+        )
+
+        try {
+            val response = GeminiClient.service.generateContent(apiKey, request)
+            var text = response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                ?: return@withContext Result.failure(Exception("Réponse vide de Gemini"))
+
+            // Clean up codeblock if present
+            if (text.contains("```json")) {
+                text = text.substringAfter("```json").substringBefore("```")
+            } else if (text.contains("```")) {
+                text = text.substringAfter("```").substringBefore("```")
+            }
+            text = text.trim()
+
+            val jsonObject = org.json.JSONObject(text)
+            val globalVerdict = jsonObject.optString("globalVerdict", "Partie très intéressante. Continuez à analyser votre jeu.")
+            
+            val keyMomentsList = mutableListOf<com.example.data.model.KeyMomentFeedback>()
+            val keyMomentsArr = jsonObject.optJSONArray("keyMoments")
+            if (keyMomentsArr != null) {
+                for (i in 0 until keyMomentsArr.length()) {
+                    val momentObj = keyMomentsArr.getJSONObject(i)
+                    val moveNumber = momentObj.optInt("moveNumber", 1)
+                    val moveNotation = momentObj.optString("moveNotation", "")
+                    val type = momentObj.optString("type", "EXCELLENT")
+                    val description = momentObj.optString("description", "")
+                    keyMomentsList.add(com.example.data.model.KeyMomentFeedback(moveNumber, moveNotation, type, description))
+                }
+            }
+            
+            val professionalTipsList = mutableListOf<String>()
+            val tipsArr = jsonObject.optJSONArray("professionalTips")
+            if (tipsArr != null) {
+                for (i in 0 until tipsArr.length()) {
+                    professionalTipsList.add(tipsArr.getString(i))
+                }
+            } else {
+                professionalTipsList.add("Pratiquez régulièrement des exercices tactiques.")
+                professionalTipsList.add("Analysez vos erreurs pour comprendre vos faiblesses.")
+                professionalTipsList.add("Étudiez les principes d'ouverture fondamentaux.")
+            }
+
+            Result.success(
+                com.example.data.model.ParsedCoachingFeedback(
+                    globalVerdict = globalVerdict,
+                    keyMoments = keyMomentsList,
+                    professionalTips = professionalTipsList
+                )
+            )
+        } catch (e: Exception) {
+            Log.e("ChessRepository", "getGeminiStructuredCoaching failure", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Download daily puzzle directly from Lichess public API.
      */
     suspend fun syncDailyPuzzle(): Result<PuzzleEntity> = withContext(Dispatchers.IO) {

@@ -507,6 +507,220 @@ fun AnalysisScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
+            // --- ASTUTE AI COACH COACHING BILLBOARD ---
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF141618)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4B7399).copy(alpha = 0.3f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("coaching_billboard_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF4B7399).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🤖", fontSize = 18.sp)
+                        }
+                        Column {
+                            Text(
+                                text = "Bilan Stratégique IA (FOCUS+)",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Analyse complète & conseils personnalisés",
+                                fontSize = 11.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    val isGenerating = viewModel.isGeneratingStructuredCoaching
+                    val coached = viewModel.parsedGameCoaching
+                    val err = viewModel.structuredCoachingError
+
+                    if (isGenerating) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color(0xFF4B7399),
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Text(
+                                text = "Calcul tactique par le Grand Maître FOCUS+...",
+                                fontSize = 12.sp,
+                                color = Color.LightGray,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    } else if (err != null) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Erreur: $err",
+                                color = Color(0xFFE53935),
+                                fontSize = 12.sp
+                            )
+                            Button(
+                                onClick = { viewModel.generateStructuredGameCoaching(geminiApiKey) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2F33)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.testTag("retry_coaching_btn")
+                            ) {
+                                Text("Réessayer", fontSize = 12.sp, color = Color.White)
+                            }
+                        }
+                    } else if (coached != null) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            // Verdict Section
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "🏆 Tournant & Style de Jeu",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF4CA288)
+                                )
+                                Text(
+                                    text = coached.globalVerdict,
+                                    fontSize = 13.sp,
+                                    color = Color.LightGray,
+                                    lineHeight = 18.sp
+                                )
+                            }
+
+                            Divider(color = Color.White.copy(alpha = 0.08f))
+
+                            // Key Moments Section
+                            if (coached.keyMoments.isNotEmpty()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        text = "🔍 Moments Clés Décortiqués",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF4B7399)
+                                    )
+                                    coached.keyMoments.forEach { moment ->
+                                        val badgeColor = when (moment.type) {
+                                            "EXCELLENT" -> Color(0xFF4CA288)
+                                            "MISTAKE" -> Color(0xFFF2994A)
+                                            "BLUNDER" -> Color(0xFFE53935)
+                                            else -> Color.Gray
+                                        }
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF1E2124))
+                                                .clickable {
+                                                    // Move analysis board to the target index if requested
+                                                    val candidateIdx = (moment.moveNumber - 1) * 2
+                                                    if (candidateIdx >= 0 && candidateIdx < viewModel.moveHistoryList.size) {
+                                                        viewModel.selectHistoryMove(candidateIdx, geminiApiKey)
+                                                    }
+                                                }
+                                                .padding(10.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            verticalAlignment = Alignment.Top
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(badgeColor.copy(alpha = 0.15f))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = "${moment.type} - K${moment.moveNumber}",
+                                                    color = badgeColor,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
+
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = "Coup joué : ${moment.moveNotation}",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = moment.description,
+                                                    fontSize = 11.sp,
+                                                    color = Color.LightGray,
+                                                    lineHeight = 16.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                Divider(color = Color.White.copy(alpha = 0.08f))
+                            }
+
+                            // Advice Section
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "💡 Recommandations de GM",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFD4AF37)
+                                )
+                                coached.professionalTips.forEach { tip ->
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.Top,
+                                        modifier = Modifier.padding(vertical = 2.dp)
+                                    ) {
+                                        Text("⭐", fontSize = 12.sp, color = Color(0xFFD4AF37))
+                                        Text(
+                                            text = tip,
+                                            fontSize = 12.sp,
+                                            color = Color.LightGray,
+                                            lineHeight = 16.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = { viewModel.generateStructuredGameCoaching(geminiApiKey) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4B7399)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("generate_structured_coaching_btn")
+                        ) {
+                            Text("Générer le Bilan Pédagogique (IA)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             // --- SECTOR SETTINGS & UTILS PANEL ---
             Card(
                 shape = RoundedCornerShape(12.dp),
