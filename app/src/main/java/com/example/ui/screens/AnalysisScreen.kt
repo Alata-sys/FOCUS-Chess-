@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Hearing
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Loop
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -67,29 +68,45 @@ fun AnalysisScreen(
         }
     }
 
+    // Clean and robust rating parser
+    class EvalState(
+        val isMate: Boolean,
+        val mateMoves: Int?, // positive if white has mate, negative if black has mate
+        val cpValue: Double // pawns evaluation scale. e.g. 1.2
+    )
+
     val evalScoreStr = stockfishEval
-    val evalDouble = remember(evalScoreStr) {
+    val parsedEval = remember(evalScoreStr) {
         try {
             val clean = evalScoreStr.trim()
-            if (clean.contains("Mat") || clean.contains("Mate") || clean.contains("#")) {
-                if (clean.contains("-")) -9.9 else 9.9
+            if (clean.contains("Mat", ignoreCase = true) || 
+                clean.contains("Mate", ignoreCase = true) || 
+                clean.contains("#", ignoreCase = true) || 
+                clean.contains("M", ignoreCase = true)
+            ) {
+                val numberOnly = clean.filter { it.isDigit() }.toIntOrNull() ?: 3
+                val isBlackMate = clean.contains("-") || clean.contains("noir", ignoreCase = true)
+                val moves = if (isBlackMate) -numberOnly else numberOnly
+                EvalState(isMate = true, mateMoves = moves, cpValue = if (isBlackMate) -9.9 else 9.9)
             } else {
-                clean.replace("+", "").replace(" ", "").toDoubleOrNull() ?: 0.0
+                val doubleVal = clean.replace("+", "").replace(" ", "").toDoubleOrNull() ?: 0.0
+                EvalState(isMate = false, mateMoves = null, cpValue = doubleVal)
             }
         } catch (e: Exception) {
-            0.0
+            EvalState(isMate = false, mateMoves = null, cpValue = 0.0)
         }
     }
 
-    val (whiteHeight, blackHeight) = remember(evalDouble) {
+    val (whiteHeight, blackHeight) = remember(parsedEval) {
         val w: Double
         val b: Double
-        if (evalDouble > 0) {
-            val wh = 50.0 + evalDouble * 10.0
+        val cp = parsedEval.cpValue
+        if (cp > 0) {
+            val wh = 50.0 + cp * 10.0
             w = wh.coerceIn(5.0, 95.0)
             b = 100.0 - w
         } else {
-            val bh = 50.0 + Math.abs(evalDouble) * 10.0
+            val bh = 50.0 + Math.abs(cp) * 10.0
             b = bh.coerceIn(5.0, 95.0)
             w = 100.0 - b
         }
@@ -102,11 +119,48 @@ fun AnalysisScreen(
             .background(Color(0xFF0F1011))
             .testTag("analysis_screen_root")
     ) {
+        // Get active game and profile for badge data
+        val games by viewModel.gamesList.collectAsState()
+        val profile by viewModel.activeProfile.collectAsState()
+        val activeGame = remember(games, viewModel.selectedGameId) { games.find { it.id == viewModel.selectedGameId } }
+        val userName = profile?.username ?: ""
+        
+        val isWhite = activeGame?.whiteUser.equals(userName, ignoreCase = true)
+        val opponentName = if (isWhite) activeGame?.blackUser ?: "" else activeGame?.whiteUser ?: ""
+        val opponentElo = if (isWhite) activeGame?.blackElo ?: 0 else activeGame?.whiteElo ?: 0
+        val userElo = if (isWhite) activeGame?.whiteElo ?: 0 else activeGame?.blackElo ?: 0
+        
+        // Extract real white and black rating changes
+        val whiteRatingChange = activeGame?.whiteRatingDiff
+        val blackRatingChange = activeGame?.blackRatingDiff
+
+        val userRatingChange = if (isWhite) whiteRatingChange else blackRatingChange
+        val opponentRatingChange = if (isWhite) blackRatingChange else whiteRatingChange
+
+        val oppTop = !viewModel.isBoardFlipped
+        
+        // --- TOP BADGE ---
+        Box(
+            modifier = Modifier
+                .padding(start = 64.dp, end = 12.dp)
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            PlayerBadge(
+                name = if (oppTop) opponentName else userName,
+                elo = if (oppTop) opponentElo else userElo,
+                ratingDiff = if (oppTop) opponentRatingChange else userRatingChange,
+                isUser = !oppTop,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
         // --- CHESS BOARD & VERTICAL ADVANTAGE BAR ROW (1.05 Aspect Ratio) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp)
+                .padding(horizontal = 12.dp)
                 .aspectRatio(1.1f)
                 .background(Color.Black),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -145,9 +199,34 @@ fun AnalysisScreen(
                     )
                 }
 
-                // Format values for display: Top is Black (-evalDouble), Bottom is White (evalDouble)
-                val topLabel = if (-evalDouble == 9.9) "M" else if (-evalDouble == -9.9) "-M" else if (-evalDouble >= 0) "+${String.format(java.util.Locale.US, "%.1f", -evalDouble)}" else String.format(java.util.Locale.US, "%.1f", -evalDouble)
-                val bottomLabel = if (evalDouble == 9.9) "M" else if (evalDouble == -9.9) "-M" else if (evalDouble >= 0) "+${String.format(java.util.Locale.US, "%.1f", evalDouble)}" else String.format(java.util.Locale.US, "%.1f", evalDouble)
+                val topLabel = remember(parsedEval) {
+                    if (parsedEval.isMate) {
+                        val mMoves = parsedEval.mateMoves ?: 3
+                        if (mMoves > 0) {
+                            "-M$mMoves"
+                        } else {
+                            "M${Math.abs(mMoves)}"
+                        }
+                    } else {
+                        val negated = -parsedEval.cpValue
+                        val capped = negated.coerceIn(-5.0, 5.0)
+                        String.format(java.util.Locale.US, "%+.1f", capped)
+                    }
+                }
+
+                val bottomLabel = remember(parsedEval) {
+                    if (parsedEval.isMate) {
+                        val mMoves = parsedEval.mateMoves ?: 3
+                        if (mMoves > 0) {
+                            "M$mMoves"
+                        } else {
+                            "-M${Math.abs(mMoves)}"
+                        }
+                    } else {
+                        val capped = parsedEval.cpValue.coerceIn(-5.0, 5.0)
+                        String.format(java.util.Locale.US, "%+.1f", capped)
+                    }
+                }
 
                 // Top Label (Côté Noirs - Opposé mathématique)
                 Box(
@@ -206,6 +285,23 @@ fun AnalysisScreen(
                     isFlipped = viewModel.isBoardFlipped
                 )
             }
+        }
+        
+        // --- BOTTOM BADGE ---
+        Box(
+            modifier = Modifier
+                .padding(start = 64.dp, end = 12.dp)
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            PlayerBadge(
+                name = if (oppTop) userName else opponentName,
+                elo = if (oppTop) userElo else opponentElo,
+                ratingDiff = if (oppTop) userRatingChange else opponentRatingChange,
+                isUser = oppTop,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         // --- MAIN SCROLL CONTAINER ---
@@ -328,6 +424,8 @@ fun AnalysisScreen(
                 }
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
             // --- DEEP DISCREET VOICE COACH MODE (NO HOGGING CARDS) ---
             Row(
                 modifier = Modifier
@@ -351,7 +449,7 @@ fun AnalysisScreen(
 
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(Color(0x154CA288))
                         .clickable { viewModel.speakAdvice(coachAdvice) },
@@ -363,26 +461,50 @@ fun AnalysisScreen(
                         tint = Color(0xFF4CA288),
                         modifier = Modifier
                             .graphicsLayer(scaleX = scale, scaleY = scale)
-                            .size(20.dp)
+                            .size(24.dp)
                     )
                 }
+            }
 
-                Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-                Column {
-                    Text(
-                        text = if (isAnalyzing) "🧙‍♂️ Coach IA : Analyse vocale..." else "🧙‍♂️ Coach Vocal FOCUS+ Actif",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF4CA288)
-                    )
-                    Text(
-                        text = if (isAnalyzing) "Stockfish + Gemini évaluent en continu..." else "Cliquez sur l'icône pour répéter l'analyse",
-                        fontSize = 10.sp,
-                        color = Color.Gray,
-                        fontWeight = FontWeight.Medium
-                    )
+            // --- LIGNES CANDIDATES ---
+            val candidateLines by viewModel.stockfishJsEngine.candidateLines.collectAsState()
+            if (isLocalEngine && candidateLines.isNotEmpty()) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141618)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = Color(0xFF4CA288),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Lignes Candidates (MultiPV)",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        candidateLines.forEach { line ->
+                            Text(
+                                text = line,
+                                fontSize = 11.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = Color.LightGray,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
             // --- SECTOR SETTINGS & UTILS PANEL ---
@@ -427,6 +549,65 @@ fun AnalysisScreen(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+fun PlayerBadge(
+    name: String,
+    elo: Int,
+    ratingDiff: Int?,
+    isUser: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Icon
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(if (isUser) Color(0xFF4B7399) else Color(0xFF40444B)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = name.take(1).uppercase(),
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = name,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = "($elo)",
+            color = Color.LightGray,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium
+        )
+        if (ratingDiff != null && ratingDiff != 0) {
+            Spacer(modifier = Modifier.width(6.dp))
+            val color = if (ratingDiff > 0) Color(0xFF4CA288) else Color(0xFFE53935)
+            Text(
+                text = "${if (ratingDiff > 0) "+" else ""}$ratingDiff",
+                color = color,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+            )
         }
     }
 }

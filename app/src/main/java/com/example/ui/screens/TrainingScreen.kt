@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -422,12 +423,169 @@ fun TrainingScreen(
                     )
                 }
             }
-
         } else {
             // ==================== OPENINGS PRACTICE VIEW ====================
             val activeOpeningId = viewModel.selectedOpeningId
+            val isSpacedRepMode = viewModel.isLotusSpacedRepetitionMode
             
-            if (activeOpeningId != null) {
+            if (isSpacedRepMode) {
+                // ACTIVE LOTUS SPACED REPETITION STUDY CARD
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141618)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp)
+                        .testTag("spaced_repetition_study_card")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Répétition Espacée LotusChess 🌸",
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF81C784),
+                            fontSize = 16.sp,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start
+                        )
+                        
+                        Text(
+                            text = "Position issue de : ${viewModel.currentSpacedRepetitionOpeningName}",
+                            color = Color.LightGray,
+                            fontSize = 12.sp,
+                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                            textAlign = TextAlign.Start
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Niveau ${viewModel.masteredOpeningsPositions / 50}",
+                                color = Color(0xFF81C784),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = "${viewModel.masteredOpeningsPositions} / 1000 positions apprises",
+                                color = Color.Gray,
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        // Progress Bar
+                        Spacer(modifier = Modifier.height(6.dp))
+                        val progressFraction = (viewModel.masteredOpeningsPositions / 1000f).coerceIn(0f, 1f)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color(0xFF222428))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(progressFraction)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFF81C784))
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Opening Board Component
+                        ChessBoardUi(
+                            board = viewModel.currentBoardState,
+                            selectedSquare = viewModel.selectedSquare,
+                            possibleMoves = viewModel.possibleMoves,
+                            isWhiteTurn = viewModel.isWhiteTurn,
+                            boardTheme = viewModel.reactBoardTheme,
+                            onSquareClick = { idx ->
+                                viewModel.handleSpacedRepetitionSquareClick(idx)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .shadow(4.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Feedback box
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF1E2124))
+                                .padding(14.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(text = "🌸", fontSize = 24.sp)
+                                Column {
+                                    Text(
+                                        text = "Guide Répétition Espacée",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF81C784)
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = viewModel.openingProgressMessage,
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Next & Back controls
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Button(
+                                onClick = { viewModel.loadNextSpacedRepetitionPosition() },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3C3F41)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Passer / Suivante", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                            }
+
+                            Button(
+                                onClick = { viewModel.quitSpacedRepetition() },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF81C784)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp)
+                            ) {
+                                Text("Quitter", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            }
+                        }
+                    }
+                }
+            } else if (activeOpeningId != null) {
                 // ACTIVE STUDY SCREEN
                 val currentOpening = defaultOpeningLines.find { it.id == activeOpeningId }
                 
@@ -553,32 +711,113 @@ fun TrainingScreen(
                     }
                 }
             } else {
-                // OPENINGS LIST SCREEN
+                // OPENINGS LIST SCREEN WITH PROGRESS OVERVIEW AND COMPREHENSIVE TIERING
                 Card(
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2124)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141618)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 16.dp)
+                        .testTag("lotuschess_global_opener_summary_card")
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "📖", fontSize = 22.sp)
+                            Text(text = "🌸", fontSize = 24.sp)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Pratique Interactive des Ouvertures",
+                                text = "Système d'Ouvertures Pro (LotusChess)",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = Color(0xFF81C784)
                             )
                         }
+                        
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Entraînez-vous sur les premiers coups théoriques clés. L'assistant IA et le moteur Stockfish.js évaluent instantanément vos coups alternatifs si vous déviez de la théorie !",
+                            text = "Entraînez-vous avec l'algorithme de répétition espacée. Chaque groupe de 50 positions mémorisées déverrouille le palier de maîtrise supérieur de la théorie moderne !",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.LightGray,
                             lineHeight = 16.sp
                         )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Stats Grid of Spaced Repetition progress
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "MÉMORISÉ",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Gray
+                                )
+                                Text(
+                                    text = "${viewModel.masteredOpeningsPositions} / 1000",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                            
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "PALIER ACTUEL",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Gray
+                                )
+                                Text(
+                                    text = "Niveau ${viewModel.masteredOpeningsPositions / 50}",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF81C784)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val progressFraction = (viewModel.masteredOpeningsPositions / 1000f).coerceIn(0f, 1f)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color(0xFF222428))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(progressFraction)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFF81C784))
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Button(
+                            onClick = { viewModel.startLotusSpacedRepetition() },
+                            modifier = Modifier.fillMaxWidth().height(42.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF81C784))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Done,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Lancer la Répétition Espacée 🌸",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black
+                            )
+                        }
                     }
                 }
 

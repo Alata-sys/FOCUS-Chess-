@@ -68,74 +68,48 @@ fun DashboardScreen(
             .padding(horizontal = 16.dp)
             .testTag("dashboard_screen_root")
     ) {
-        // --- HEADER ROW (LotusChess PRO | Flame | User) ---
         item {
-            Spacer(modifier = Modifier.height(16.dp))
+            var showSettingsDialog by remember { mutableStateOf(false) }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(top = 16.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Column {
                     Text(
-                        text = "LotusChess",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold,
+                        text = "Statistiques d’Élite",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                    // Gradient PRO Badge
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(Color(0xFFFF4081), Color(0xFFFF9100))
-                                )
-                            )
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "PRO",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Flame Streak
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text("🔥", fontSize = 16.sp)
-                        Text(
-                            text = "1",
-                            color = Color(0xFFE53935),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
-
-                    // Profile outline placeholder
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Profil de ${safeProfile.username}",
-                        tint = Color.Gray,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clickable { viewModel.logout() }
+                    Text(
+                        text = "FOCUS+ Chess & Profil Lichess",
+                        fontSize = 11.sp,
+                        color = Color.Gray
                     )
                 }
+
+                IconButton(
+                    onClick = { showSettingsDialog = true },
+                    modifier = Modifier.testTag("dashboard_settings_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Paramètres du moteur",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+
+            if (showSettingsDialog) {
+                EngineSettingsDialog(
+                    onDismiss = { showSettingsDialog = false },
+                    viewModel = viewModel
+                )
             }
         }
 
@@ -192,14 +166,6 @@ fun DashboardScreen(
                     .padding(vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Header of profile layout
-                Text(
-                    text = "Profil Élo Complet",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-
                 // Row 1: Puzzles (Full screen primary card)
                 EloGridCard(
                     config = cadences[0],

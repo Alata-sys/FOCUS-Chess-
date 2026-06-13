@@ -67,10 +67,12 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     var activeMoveIndex by mutableStateOf(-1)
 
     // --- Analytical Feedback States ---
+    val engineManager = com.example.engine.EngineManager.getInstance(application)
     val stockfishJsEngine = StockfishJsEngine(application)
-    var isLocalEngineMode by mutableStateOf(true) // Default to local Web Worker engine since user requested it!
+    var isLocalEngineMode by mutableStateOf(engineManager.activeEngineType.value == com.example.engine.AnalysisEngineType.STOCKFISH_LOCAL)
     fun toggleEngineMode() {
-        isLocalEngineMode = !isLocalEngineMode
+        val nextType = if (isLocalEngineMode) com.example.engine.AnalysisEngineType.LICHESS else com.example.engine.AnalysisEngineType.STOCKFISH_LOCAL
+        engineManager.setActiveEngine(nextType)
     }
     var localEngineStatus by mutableStateOf("Démarrage du Thread Stockfish.js...")
 
@@ -110,6 +112,15 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     var userLoginInput by mutableStateOf("")
     var customClientId by mutableStateOf("")
     var cachedAnalyses by mutableStateOf<Map<Int, com.example.data.model.MoveAnalysis>>(emptyMap())
+
+    // Spaced Repetition & LotusChess Openings Progression
+    var masteredOpeningsPositions by mutableStateOf(45)
+    var isLotusSpacedRepetitionMode by mutableStateOf(false)
+    var currentSpacedRepetitionOpeningName by mutableStateOf("")
+    var currentSpacedRepetitionMove by mutableStateOf<OpeningMove?>(null)
+
+    var isPreAnalyzingBackground by mutableStateOf(false)
+    var preAnalysisProgress by mutableStateOf("")
 
     // Accessibility & Modern Lichess Toggles
     var isBoardFlipped by mutableStateOf(false)
@@ -155,6 +166,10 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     init {
         ChessSoundManager.initialize(application)
         ttsManager = ChessTtsManager(application)
+
+        // Load mastered openings positions
+        val prefs = application.getSharedPreferences("lotuschess_opening_prefs", Context.MODE_PRIVATE)
+        masteredOpeningsPositions = prefs.getInt("mastered_positions", 45)
         
         // Feed offline default puzzles into database if base is empty
         viewModelScope.launch {
@@ -170,6 +185,15 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
             repository.syncDailyPuzzle()
         }
 
+        // Proactive sync for active profile games
+        viewModelScope.launch {
+            activeProfile.collect { profile ->
+                if (profile != null) {
+                    preAnalyzeAllUnanalyzedGames()
+                }
+            }
+        }
+
         // Listen for Local Stockfish.js Web Worker engine statuses and evaluations
         viewModelScope.launch {
             stockfishJsEngine.status.collect { status ->
@@ -178,6 +202,12 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
                     "INITIALIZING" -> "Démarrage du Thread Stockfish.js..."
                     else -> status
                 }
+            }
+        }
+
+        viewModelScope.launch {
+            engineManager.activeEngineType.collect { type ->
+                isLocalEngineMode = (type == com.example.engine.AnalysisEngineType.STOCKFISH_LOCAL)
             }
         }
 
@@ -209,6 +239,7 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
             isAnalyzing = false
             if (result.isSuccess) {
                 userLoginInput = ""
+                preAnalyzeAllUnanalyzedGames()
                 onCallback(true)
             } else {
                 onCallback(false)
@@ -281,6 +312,7 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
             isAnalyzing = false
             if (result.isSuccess) {
                 coachAdvice = "Connexion OAuth réussie ! Votre profil et vos parties ont été importés."
+                preAnalyzeAllUnanalyzedGames()
                 onCallback(true)
             } else {
                 coachAdvice = "Erreur de connexion OAuth. Veuillez réessayer."
@@ -357,7 +389,6 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         activeMoveIndex = -1
         gameSummaryReport = null
         
-        coachAdvice = "Partie chargée : ${game.whiteUser} contre ${game.blackUser}. Analyse anticipée en arrière-plan..."
         stockfishEval = if (game.winner == "white") "+Mat" else if (game.winner == "black") "-Mat" else "Égalité"
         
         originalBoardState = ChessEngine.parseFen(game.initialFen)
@@ -368,9 +399,35 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
         // Clean cache
         cachedAnalyses = emptyMap()
 
-        // BACKROUND ANTICIPATORY ANALYSIS CALL!
         val apiKey = com.example.BuildConfig.GEMINI_API_KEY ?: "MY_GEMINI_API_KEY"
-        triggerAnticipatoryAnalysis(movesList, apiKey)
+
+        if (!game.analysisExplain.isNullOrEmpty()) {
+            try {
+                val jsonObject = org.json.JSONObject(game.analysisExplain)
+                val resultMap = mutableMapOf<Int, com.example.data.model.MoveAnalysis>()
+                val keys = jsonObject.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val idx = key.toIntOrNull() ?: continue
+                    val innerObj = jsonObject.optJSONObject(key)
+                    if (innerObj != null) {
+                        val comment = innerObj.optString("comment", "Coup analysé.")
+                        val eval = innerObj.optDouble("evaluation", 0.0)
+                        resultMap[idx] = com.example.data.model.MoveAnalysis(comment, eval)
+                    }
+                }
+                cachedAnalyses = resultMap
+                coachAdvice = "Analyse chargée de la mémoire locale ! Fluidité de navigation instantanée garantie à 100%."
+                Log.d("ChessCoachViewModel", "Loaded fully cached analysis for game ${game.id}")
+            } catch (e: Exception) {
+                Log.e("ChessCoachViewModel", "Failed to load cached analysis", e)
+                coachAdvice = "Erreur de lecture du cache local. Analyse en arrière-plan..."
+                triggerAnticipatoryAnalysis(movesList, apiKey)
+            }
+        } else {
+            coachAdvice = "Partie chargée : ${game.whiteUser} contre ${game.blackUser}. Analyse anticipée en arrière-plan..."
+            triggerAnticipatoryAnalysis(movesList, apiKey)
+        }
 
         // Immediately jump to the end of the game
         if (movesList.isNotEmpty()) {
@@ -1159,6 +1216,267 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     fun closeOpeningStudy() {
         selectedOpeningId = null
         openingProgressMessage = "Sélectionnez une ouverture mythique ci-dessous pour commencer !"
+    }
+
+    fun incrementMasteredPositions(count: Int) {
+        val application = getApplication<Application>()
+        val prefs = application.getSharedPreferences("lotuschess_opening_prefs", Context.MODE_PRIVATE)
+        masteredOpeningsPositions = (masteredOpeningsPositions + count).coerceAtMost(1000)
+        prefs.edit().putInt("mastered_positions", masteredOpeningsPositions).apply()
+    }
+
+    fun preAnalyzeAllUnanalyzedGames() {
+        if (isPreAnalyzingBackground) return
+        val apiKey = com.example.BuildConfig.GEMINI_API_KEY ?: "MY_GEMINI_API_KEY"
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") return
+        
+        viewModelScope.launch(Dispatchers.Default) {
+            isPreAnalyzingBackground = true
+            
+            // Allow the UI to complete its initial load and become fully interactive immediately
+            kotlinx.coroutines.delay(2000)
+            
+            try {
+                val games = gamesList.value
+                val unanalyzed = games.filter { it.analysisExplain.isNullOrEmpty() }
+                
+                Log.d("ChessCoachViewModel", "Starting background pre-analysis for ${unanalyzed.size} games")
+                
+                for ((idx, game) in unanalyzed.withIndex()) {
+                    // Let the thread breathe and process user clicks/events between games
+                    kotlinx.coroutines.delay(300)
+                    
+                    withContext(Dispatchers.Main) {
+                        preAnalysisProgress = "Analyse en arrière-plan ${idx + 1}/${unanalyzed.size} (${game.whiteUser}...) "
+                    }
+                    
+                    // Mechanism to protect against infinite loops or extremely slow responses (5-second safety timeout)
+                    val success = kotlinx.coroutines.withTimeoutOrNull(5000) {
+                        try {
+                            val movesList = game.moves.split(" ").filter { it.isNotEmpty() }
+                            if (movesList.isEmpty()) return@withTimeoutOrNull true
+                            
+                            // 1. Generate FENs for all moves in this game (CPU bound!)
+                            val fens = mutableListOf<String>()
+                            var board = ChessEngine.parseFen(game.initialFen)
+                            var whiteTurn = true
+                            for (moveStr in movesList) {
+                                // Yield during intensive chess simulations to process other tasks
+                                kotlinx.coroutines.yield()
+                                val result = ChessEngine.parseAndExecuteAnyMove(board, moveStr, whiteTurn)
+                                if (result != null) {
+                                    board = result.first
+                                }
+                                whiteTurn = !whiteTurn
+                                fens.add(ChessEngine.toFen(board, whiteTurn))
+                            }
+                            
+                            // 2. Fetch Stockfish evaluations with an ultra-short safety timeout
+                            val realStockfishEvals = mutableMapOf<Int, String>()
+                            fens.forEachIndexed { fIdx, fen ->
+                                kotlinx.coroutines.yield()
+                                try {
+                                    val evalData = kotlinx.coroutines.withTimeoutOrNull(1500) {
+                                        repository.fetchLichessCloudEval(fen)
+                                    }
+                                    realStockfishEvals[fIdx] = evalData?.score ?: "0.0"
+                                } catch (e: Exception) {
+                                    realStockfishEvals[fIdx] = "0.0"
+                                }
+                            }
+                            
+                            // 3. Request Gemini analyses for the moves with a short safety timeout
+                            val result = kotlinx.coroutines.withTimeoutOrNull(3000) {
+                                repository.getAnticipatedMoveAnalyses(movesList, apiKey)
+                            }
+                            if (result != null && result.isSuccess) {
+                                val rawMap = result.getOrNull() ?: emptyMap()
+                                
+                                // Merge Stockfish + Gemini
+                                val merged = rawMap.mapValues { (index, analysis) ->
+                                    val trueEval = realStockfishEvals[index] ?: "0.0"
+                                    var scoreVal = 0.0
+                                    try {
+                                        if (trueEval.contains("Mat") || trueEval.contains("Mate")) {
+                                            scoreVal = if (trueEval.contains("-")) -9.9 else 9.9
+                                        } else {
+                                            scoreVal = trueEval.replace("+", "").replace(" ", "").toDoubleOrNull() ?: 0.0
+                                        }
+                                    } catch (e: Exception) {}
+                                    
+                                    com.example.data.model.MoveAnalysis(
+                                        comment = analysis.comment,
+                                        evaluation = scoreVal
+                                    )
+                                }
+                                
+                                // Serialize to JSON and save to database
+                                val jsonObject = org.json.JSONObject()
+                                merged.forEach { (index, analysis) ->
+                                    val inner = org.json.JSONObject().apply {
+                                        put("comment", analysis.comment)
+                                        put("evaluation", analysis.evaluation)
+                                    }
+                                    jsonObject.put(index.toString(), inner)
+                                }
+                                
+                                repository.updateGameAnalysis(game.id, jsonObject.toString())
+                                Log.d("ChessCoachViewModel", "Successfully preanalyzed and cached game ${game.id}")
+                            }
+                        } catch (e: Exception) {
+                            Log.e("ChessCoachViewModel", "Failed to background pre-analyze game ${game.id}", e)
+                        }
+                        true
+                    }
+                    
+                    if (success == null) {
+                        Log.e("ChessCoachViewModel", "Cancelled / Timed out background pre-analysis for game ${game.id}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ChessCoachViewModel", "Failed in global pre-analysis scope", e)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isPreAnalyzingBackground = false
+                    preAnalysisProgress = ""
+                }
+            }
+        }
+    }
+
+    fun startLotusSpacedRepetition() {
+        isLotusSpacedRepetitionMode = true
+        loadNextSpacedRepetitionPosition()
+    }
+
+    fun loadNextSpacedRepetitionPosition() {
+        val extraLines = listOf(
+            OpeningLine(
+                id = "caro_kann",
+                name = "Défense Caro-Kann",
+                description = "Une ouverture hyper-solide pour contester le pion e4 central.",
+                moves = listOf(
+                    OpeningMove(1, "White", "e2e4", "e4", "À vous de jouer : Projetez e4 au centre.", "Correct ! e4 lance le débat central."),
+                    OpeningMove(1, "Black", "c7c6", "c6", "Les noirs préparent d5 avec c6.", ""),
+                    OpeningMove(2, "White", "d2d4", "d4", "Prenez tout le centre en plaçant d4.", "Parfait ! Le duo e4/d4 domine l'espace central."),
+                    OpeningMove(2, "Black", "d7d5", "d5", "Les noirs attaquent votre pion e4.", "")
+                )
+            ),
+            OpeningLine(
+                id = "scandinavian",
+                name = "Défense Scandinave",
+                description = "L'une des contre-attaques les plus directes contre 1.e4.",
+                moves = listOf(
+                    OpeningMove(1, "White", "e2e4", "e4", "À vous de jouer : Ouvrez fidèlement avec e4.", "Excellent ! e4 est actif."),
+                    OpeningMove(1, "Black", "d7d5", "d5", "Les noirs répliquent immédiatement avec d5.", ""),
+                    OpeningMove(2, "White", "e4d5", "exd5", "Capturez le pion noir d5.", "Génial ! exd5 ouvre de solides lignes de combat.")
+                )
+            ),
+            OpeningLine(
+                id = "italian_game",
+                name = "Partie Italienne (Jiuoco Piano)",
+                description = "Une ouverture historique ouverte privilégiant un développement rapide et sain.",
+                moves = listOf(
+                    OpeningMove(1, "White", "e2e4", "e4", "À vous de jouer : Proposez e4 au premier coup.", "Parfait ! e4 ouvre le jeu."),
+                    OpeningMove(1, "Black", "e7e5", "e5", "Les noirs jouent de manière symétrique.", ""),
+                    OpeningMove(2, "White", "g1f3", "Nf3", "Développez votre cavalier en f3 pour presser e5.", "Correct ! Nf3 est naturel."),
+                    OpeningMove(2, "Black", "b8c6", "Nc6", "Le cavalier noir défend e5.", ""),
+                    OpeningMove(3, "White", "f1c4", "Bc4", "Développez votre fou en c4 pour attaquer la case faible f7.", "Actif ! Bc4 définit l'Italienne mythique, visant f7 !")
+                )
+            )
+        )
+        
+        val pool = defaultOpeningLines + extraLines
+        val randomLine = pool.random()
+        val moves = randomLine.moves
+        if (moves.isEmpty()) return
+        
+        val randomMoveRandomIdx = Random.nextInt(moves.size)
+        val targetMove = moves[randomMoveRandomIdx]
+        
+        selectedOpeningId = randomLine.id
+        currentOpeningMoveIdx = randomMoveRandomIdx
+        isOpeningCompleted = false
+        customOpeningDeviationPlayed = false
+        currentSpacedRepetitionOpeningName = randomLine.name
+        currentSpacedRepetitionMove = targetMove
+        
+        // Reconstruct position up to targetMove
+        originalBoardState = ChessEngine.parseFen(randomLine.initialFen)
+        var board = originalBoardState.copyOf()
+        var whiteTurn = true
+        for (i in 0 until randomMoveRandomIdx) {
+            val mv = moves[i]
+            val result = ChessEngine.parseAndExecuteAnyMove(board, mv.algebraicMove, whiteTurn)
+            if (result != null) {
+                board = result.first
+            }
+            whiteTurn = !whiteTurn
+        }
+        currentBoardState = board
+        isWhiteTurn = whiteTurn
+        displayedFen = ChessEngine.toFen(currentBoardState, isWhiteTurn)
+        selectedSquare = -1
+        possibleMoves = emptyList()
+        
+        openingProgressMessage = "LotusChess Répétition Espacée 🌸\n\nPosition issue de : ${randomLine.name}\n👉 ${targetMove.prompt}"
+        speakAdvice("${targetMove.prompt}")
+    }
+
+    fun handleSpacedRepetitionSquareClick(index: Int) {
+        val targetMove = currentSpacedRepetitionMove ?: return
+        val piece = currentBoardState[index]
+        
+        if (selectedSquare == -1) {
+            val expectedColor = targetMove.playerColor
+            val isPieceWhite = ChessEngine.isWhitePiece(piece)
+            val isCorrectColorSelect = (expectedColor == "White" && isPieceWhite && isWhiteTurn) ||
+                                      (expectedColor == "Black" && !isPieceWhite && !isWhiteTurn)
+            
+            if (piece != '.' && isCorrectColorSelect) {
+                selectedSquare = index
+                possibleMoves = ChessEngine.findPossibleMoves(currentBoardState, index)
+            }
+        } else {
+            if (index in possibleMoves) {
+                val fromIdx = selectedSquare
+                val oldBoard = currentBoardState.copyOf()
+                val res = ChessEngine.executeMove(currentBoardState, fromIdx, index)
+                val testMoveStr = res.second
+                
+                if (testMoveStr.equals(targetMove.algebraicMove, ignoreCase = true)) {
+                    currentBoardState = res.first
+                    val nextWhiteTurn = !isWhiteTurn
+                    isWhiteTurn = nextWhiteTurn
+                    displayedFen = ChessEngine.toFen(currentBoardState, isWhiteTurn)
+                    
+                    playMoveSound(oldBoard, currentBoardState, nextWhiteTurn)
+                    
+                    // Award points! Mastered +5 positions!
+                    incrementMasteredPositions(5)
+                    
+                    isOpeningCompleted = true
+                    openingProgressMessage = "Félicitations 🌸 !\n\nVous avez trouvé le coup d'ouverture exact : ${targetMove.san} !\n${targetMove.explanation}\n\n+5 positions ajoutées à votre mémorisation LotusChess (${masteredOpeningsPositions}/1000) !"
+                    speakAdvice("Excellent ! Vous avez maîtrisé cinq nouvelles positions théoriques.")
+                    ChessSoundManager.playGameEnd()
+                } else {
+                    currentBoardState = res.first
+                    isWhiteTurn = !isWhiteTurn
+                    displayedFen = ChessEngine.toFen(currentBoardState, isWhiteTurn)
+                    customOpeningDeviationPlayed = true
+                    
+                    openingProgressMessage = "Déviation de l'ouverture théorique 💡 (Coup joué : ${res.second}).\n\nCe n'est pas le coup principal préconisé par le dictionnaire LotusChess de répétition espacée dans cette position. Essayez à nouveau."
+                    speakAdvice("Ce coup dévie de la théorie de référence de Lotus Chess. Essayez à nouveau.")
+                }
+            }
+            selectedSquare = -1
+            possibleMoves = emptyList()
+        }
+    }
+
+    fun quitSpacedRepetition() {
+        isLotusSpacedRepetitionMode = false
+        closeOpeningStudy()
     }
 
     private suspend fun feedDefaultThematicPuzzles() {
