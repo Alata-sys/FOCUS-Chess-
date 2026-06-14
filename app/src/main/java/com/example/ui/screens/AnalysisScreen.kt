@@ -426,42 +426,54 @@ fun AnalysisScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // --- DEEP DISCREET VOICE COACH MODE (NO HOGGING CARDS) ---
-            Row(
+            // --- VOICE / TEXT COACHING MODE ---
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFF141618))
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .testTag("voice_coach_indicator"),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                val infiniteTransition = rememberInfiniteTransition()
-                val scale by infiniteTransition.animateFloat(
-                    initialValue = 0.9f,
-                    targetValue = 1.25f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(650, easing = LinearEasing),
-                        repeatMode = RepeatMode.Reverse
-                    )
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color(0x154CA288))
-                        .clickable { viewModel.speakAdvice(coachAdvice) },
-                    contentAlignment = Alignment.Center
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Hearing,
-                        contentDescription = "Répéter l'analyse vocale",
-                        tint = Color(0xFF4CA288),
+                    Text(
+                        text = if (viewModel.isVoiceCoachingEnabled) "Mode Vocal Actif" else "Mode Texte Actif",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (viewModel.isVoiceCoachingEnabled) Color(0xFF4CA288) else Color(0xFFE53935)
+                    )
+                    
+                    val coachColor = if (viewModel.isVoiceCoachingEnabled) Color(0xFF4CA288) else Color(0xFFE53935)
+                    
+                    Box(
                         modifier = Modifier
-                            .graphicsLayer(scaleX = scale, scaleY = scale)
-                            .size(24.dp)
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(coachColor.copy(alpha = 0.15f))
+                            .clickable { viewModel.toggleVoiceCoaching() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Hearing,
+                            contentDescription = "Basculer entre voix et texte",
+                            tint = coachColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                if (!viewModel.isVoiceCoachingEnabled) {
+                    Text(
+                        text = coachAdvice,
+                        fontSize = 13.sp,
+                        color = Color.LightGray,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }

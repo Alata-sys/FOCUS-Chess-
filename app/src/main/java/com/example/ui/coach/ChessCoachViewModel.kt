@@ -88,6 +88,15 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     // Dashboard Insights
     var isFetchingInsights by mutableStateOf(false)
     var dashboardInsights by mutableStateOf<String?>(null)
+    
+    var isVoiceCoachingEnabled by mutableStateOf(true)
+
+    fun toggleVoiceCoaching() {
+        isVoiceCoachingEnabled = !isVoiceCoachingEnabled
+        if (!isVoiceCoachingEnabled) {
+            stopSpeaking()
+        }
+    }
 
     fun fetchDashboardInsights(apiKey: String) {
         isFetchingInsights = true
@@ -225,7 +234,9 @@ class ChessCoachViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun speakAdvice(text: String) {
-        ttsManager?.speak(text)
+        if (isVoiceCoachingEnabled) {
+            ttsManager?.speak(text)
+        }
     }
 
     fun stopSpeaking() {
