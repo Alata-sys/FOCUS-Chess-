@@ -1,0 +1,22 @@
+workflows:
+  android-build:
+    name: FOCUS Chess APK Build
+    max_build_duration: 60
+    environment:
+      java: 17
+      android_signing:
+        - keystore_reference
+    scripts:
+      - name: Clean project
+        script: ./gradlew clean
+
+      - name: Build debug APK
+        script: ./gradlew assembleDebug
+
+    artifacts:
+      - app/build/outputs/**/*.apk
+
+    publishing:
+      email:
+        recipients:
+          - you@example.com
