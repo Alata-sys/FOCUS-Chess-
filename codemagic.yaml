@@ -1,0 +1,33 @@
+workflows:
+  android-build:
+    name: FOCUS Chess APK Build
+    max_build_duration: 60
+
+    environment:
+      java: 17
+
+    scripts:
+      - name: Show project structure
+        script: |
+          echo "PROJECT STRUCTURE"
+          ls -R
+
+      - name: Make Gradle executable
+        script: |
+          chmod +x gradlew || true
+
+      - name: Verify Gradle wrapper
+        script: |
+          echo "Gradle version check"
+          ./gradlew --version || (cd android && ./gradlew --version)
+
+      - name: Clean project
+        script: |
+          ./gradlew clean || (cd android && ./gradlew clean)
+
+      - name: Build debug APK
+        script: |
+          ./gradlew assembleDebug || (cd android && ./gradlew assembleDebug)
+
+    artifacts:
+      - "**/app/build/outputs/**/*.apk"
