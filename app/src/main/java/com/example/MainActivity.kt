@@ -3,6 +3,7 @@ package com.example
 import android.content.Intent
 import android.util.Log
 import android.os.Bundle
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -88,6 +89,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Ensure WebView directories exist to prevent chromium cache enumeration errors
+        try {
+            val jsCacheDir = File(cacheDir, "WebView/Default/HTTP Cache/Code Cache/js")
+            val wasmCacheDir = File(cacheDir, "WebView/Default/HTTP Cache/Code Cache/wasm")
+            if (!jsCacheDir.exists()) {
+                jsCacheDir.mkdirs()
+            }
+            if (!wasmCacheDir.exists()) {
+                wasmCacheDir.mkdirs()
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to pre-create WebView cache directories: ${e.message}")
+        }
+
         enableEdgeToEdge()
         handleIntent(intent)
         setContent {
