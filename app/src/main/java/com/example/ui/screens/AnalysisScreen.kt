@@ -444,10 +444,10 @@ fun AnalysisScreen(
                         text = if (viewModel.isVoiceCoachingEnabled) "Mode Vocal Actif" else "Mode Texte Actif",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (viewModel.isVoiceCoachingEnabled) Color(0xFF4CA288) else Color(0xFFE53935)
+                        color = if (viewModel.isVoiceCoachingEnabled) Color(0xFF4CAF50) else Color(0xFFF44336)
                     )
                     
-                    val coachColor = if (viewModel.isVoiceCoachingEnabled) Color(0xFF4CA288) else Color(0xFFE53935)
+                    val coachColor = if (viewModel.isVoiceCoachingEnabled) Color(0xFF4CAF50) else Color(0xFFF44336)
                     
                     Box(
                         modifier = Modifier
@@ -467,8 +467,50 @@ fun AnalysisScreen(
                 }
 
                 if (!viewModel.isVoiceCoachingEnabled) {
+                    val displayedAdvice = remember(coachAdvice, currentIndex, movesList) {
+                        val isGeneralMsg = coachAdvice.startsWith("Bonjour") || 
+                                           coachAdvice.startsWith("Analyse en cours") || 
+                                           coachAdvice.startsWith("Erreur") || 
+                                           coachAdvice.startsWith("Veuillez d'abord") || 
+                                           coachAdvice.startsWith("Connexion") || 
+                                           coachAdvice.contains("sélectionner une partie", ignoreCase = true) || 
+                                           coachAdvice.contains("Prêt à démarrer", ignoreCase = true)
+                        
+                        if (currentIndex >= 0 && !isGeneralMsg && movesList.isNotEmpty()) {
+                            val moveNum = (currentIndex / 2) + 1
+                            val moveStr = movesList.getOrNull(currentIndex) ?: ""
+                            
+                            // Remove markdown symbols (asterisks, underscores, hashtags, backticks)
+                            var cleanedText = coachAdvice
+                                .replace("*", "")
+                                .replace("_", "")
+                                .replace("#", "")
+                                .replace("`", "")
+                                .replace("~", "")
+                                .trim()
+                            
+                            // Remove any existing "Move X: Y" and "Explanation:" if Gemini itself outputted it
+                            cleanedText = cleanedText
+                                .replace(Regex("(?i)Move \\d+:\\s*[^\\n]*"), "")
+                                .replace(Regex("(?i)Explanation:"), "")
+                                .replace(Regex("(?i)Explication\\s*:"), "")
+                                .trim()
+                                
+                            "Move $moveNum: $moveStr\nExplanation: $cleanedText"
+                        } else {
+                            // Strip any markdown from general messages too
+                            coachAdvice
+                                .replace("*", "")
+                                .replace("_", "")
+                                .replace("#", "")
+                                .replace("`", "")
+                                .replace("~", "")
+                                .trim()
+                        }
+                    }
+
                     Text(
-                        text = coachAdvice,
+                        text = displayedAdvice,
                         fontSize = 13.sp,
                         color = Color.LightGray,
                         lineHeight = 18.sp,

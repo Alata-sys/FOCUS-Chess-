@@ -58,7 +58,7 @@ fun DashboardScreen(
     var selectedCadence by remember { mutableStateOf("blitz") }
 
     LaunchedEffect(Unit) {
-        viewModel.fetchDashboardInsights(BuildConfig.GEMINI_API_KEY)
+        viewModel.fetchDashboardInsights(BuildConfig.GEMINI_API_KEY ?: "")
     }
 
     val safeProfile = profile ?: return
